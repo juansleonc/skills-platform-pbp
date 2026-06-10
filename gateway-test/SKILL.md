@@ -241,13 +241,13 @@ end
 **All tests run in Docker web container:**
 
 ```bash
-# Run gateway tests
-make test TEST_PATH=spec/services/payment_service/stripe_spec.rb
+# Run gateway tests (preferred: bin/d)
+bin/d rspec spec/services/payment_service/stripe_spec.rb
 
 # Run all payment tests
-make test TEST_PATH=spec/services/payment_service/
+bin/d rspec spec/services/payment_service/
 
-# With VCR recording
+# With VCR recording (env-var requires docker compose explicit -e)
 docker compose exec -e VCR_RECORD=new_episodes web bundle exec rspec spec/services/payment_service/
 ```
 

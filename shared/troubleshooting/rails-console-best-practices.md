@@ -38,7 +38,7 @@ starts = membership.acquired_at ? membership.acquired_at.strftime('%Y-%m-%d %H:%
 
 ```bash
 # ALWAYS test locally first
-docker compose exec web bundle exec rails runner "
+bin/d runner "
   # Your script here
   puts 'Test output'
 "

@@ -238,8 +238,8 @@ Calculate a health score for each package:
 # Count violations per package
 for pack in packs/*/; do
   name=$(basename "$pack")
-  privacy=$(docker compose exec web bundle exec packwerk check "$pack" 2>&1 | grep -c "Privacy violation")
-  dependency=$(docker compose exec web bundle exec packwerk check "$pack" 2>&1 | grep -c "Dependency violation")
+  privacy=$(bin/d packwerk check "$pack" 2>&1 | grep -c "Privacy violation")
+  dependency=$(bin/d packwerk check "$pack" 2>&1 | grep -c "Dependency violation")
   todo_count=$(cat "${pack}package_todo.yml" 2>/dev/null | grep -c "^  -" || echo 0)
   echo "$name: privacy=$privacy, deps=$dependency, todos=$todo_count"
 done
@@ -249,7 +249,7 @@ done
 
 1. **Run Packwerk check**
    ```bash
-   docker compose exec web bundle exec packwerk check
+   bin/d packwerk check
    ```
 
 2. **Analyze violations**
@@ -422,15 +422,17 @@ dependencies:
 echo "dependencies:\n  - packs/webhooks" >> packs/book_a_pro/package.yml
 
 # Option 2: Update todo
-docker compose exec web bundle exec packwerk update-todo
+bin/d packwerk update-todo
 ```
 
 #### packs/merchandise
 - [ ] Dependency: Using `FeatureFlag::Setting` without declaration
   - Fix: Add to package.yml dependencies
 
-**CLI Fix:**
+**CLI Fix** (bin/d sh for interactive shell; bash -c for heredoc append requires direct docker compose):
 ```bash
+# Preferred for interactive: bin/d sh
+# For non-interactive heredoc append:
 docker compose exec web bash -c "cat >> packs/merchandise/package.yml << 'EOF'
 dependencies:
   - packs/feature_flag

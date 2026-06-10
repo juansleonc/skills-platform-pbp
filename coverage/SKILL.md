@@ -1,7 +1,7 @@
 ---
 name: coverage
 description: Use after writing tests to verify 100% patch coverage across unit, integration, and system tests.
-allowed-tools: [Bash, Read, Write, Edit, Grep, Glob, Task, mcp__ide__executeCode, mcp__ide__getDiagnostics]
+allowed-tools: [Bash, Read, Write, Edit, Grep, Glob, Agent, mcp__ide__executeCode, mcp__ide__getDiagnostics]
 disable-model-invocation: false
 ---
 
@@ -50,18 +50,29 @@ The project now has 200 more lines but only 100 more covered hits → percentage
 ```bash
 # Get the coverage delta your PR will cause
 docker compose exec -e SIMPLECOV_REPORT=true web bundle exec rspec
-
-# Compare with develop baseline (if available)
-git stash
-git checkout develop
-docker compose exec -e SIMPLECOV_REPORT=true web bundle exec rspec
-# Note the total coverage percentage
-
-git checkout -
-git stash pop
-docker compose exec -e SIMPLECOV_REPORT=true web bundle exec rspec
-# Compare with your branch's percentage
 ```
+
+To compare against the develop baseline **without leaving your feature branch** (required — see
+CLAUDE.local.md rule #16: NEVER `git checkout develop` from a feature branch):
+
+```bash
+# Option A (preferred): isolated worktree — see /worktrees skill for the full pattern
+git worktree add --detach /tmp/cov-baseline origin/develop
+# Then in a separate shell or compose one-off run against that worktree:
+# docker compose -f docker-compose.yml run --rm --no-deps \
+#   -e SIMPLECOV_REPORT=true -e BUNDLE_PATH=/usr/local/bundle \
+#   -v /tmp/cov-baseline:/app web bundle exec rspec
+# Note the total coverage percentage, then clean up:
+git worktree remove /tmp/cov-baseline
+
+# Option B (simpler for most cases): skip the develop baseline comparison entirely.
+# Use patch-coverage on changed lines instead — it is Codecov's primary check:
+bin/d rake 'coverage:local:delta'
+```
+
+> **Rule #16 Safety**: NEVER run `git stash && git checkout develop && ...` to measure a baseline.
+> That mutates your working tree and risks pushing to a protected branch (TRI-74 incident class).
+> Use a worktree or rely on patch-coverage alone.
 
 ### Step 2: Calculate Required Compensating Coverage
 
@@ -79,7 +90,7 @@ You need 50 MORE test hits beyond just covering your new code
 
 ```bash
 # Find files with lowest coverage (easy wins for compensating coverage)
-docker compose exec web bundle exec rake 'coverage:local:uncovered[20]'
+bin/d rake 'coverage:local:uncovered[20]'
 
 # Focus on files with:
 # - High line count but low coverage (more impact per test)
@@ -99,7 +110,7 @@ If your PR touches `membership.rb`, also improve coverage on:
 Target files with many uncovered lines but simple logic:
 ```bash
 # Example: Find uncovered lines in a specific file
-docker compose exec web bundle exec rake 'coverage:local:file[app/models/user.rb]'
+bin/d rake 'coverage:local:file[app/models/user.rb]'
 ```
 
 **Strategy 3: Add edge case tests**
@@ -151,7 +162,7 @@ docker compose exec -e SIMPLECOV_REPORT=true web bundle exec rspec spec/models/m
 ### Step 4: Check Coverage for Changed Lines
 ```bash
 # View coverage data for specific file
-docker compose exec web bundle exec rake 'coverage:local:file[app/models/membership.rb]'
+bin/d rake 'coverage:local:file[app/models/membership.rb]'
 ```
 
 ### Step 5: Cross-Reference Uncovered Lines
@@ -160,25 +171,25 @@ Compare the changed line numbers (Step 2) with uncovered lines from SimpleCov.
 
 ## Available Rake Tasks
 
-**All commands run in Docker web container:**
+**All commands run via `bin/d` (preferred wrapper) or `docker compose exec web bundle exec` directly:**
 
 ```bash
 # See uncovered files (top N)
-docker compose exec web bundle exec rake 'coverage:local:uncovered[10]'
+bin/d rake 'coverage:local:uncovered[10]'
 
 # Validate spec quality before committing
-docker compose exec web bundle exec rake 'coverage:validate:quick[spec/path_spec.rb]'
+bin/d rake 'coverage:validate:quick[spec/path_spec.rb]'
 
 # Check coverage progress
-docker compose exec web bundle exec rake 'coverage:local:delta'
+bin/d rake 'coverage:local:delta'
 
 # Check specific file coverage
-docker compose exec web bundle exec rake 'coverage:local:file[app/models/user.rb]'
+bin/d rake 'coverage:local:file[app/models/user.rb]'
 
 # Agent workflow tasks
-docker compose exec web bundle exec rake 'coverage:agent:next'      # Get priority file
-docker compose exec web bundle exec rake 'coverage:agent:analyze'   # Analyze file
-docker compose exec web bundle exec rake 'coverage:agent:process'   # Full workflow
+bin/d rake 'coverage:agent:next'      # Get priority file
+bin/d rake 'coverage:agent:analyze'   # Analyze file
+bin/d rake 'coverage:agent:process'   # Full workflow
 ```
 
 ## Test Locations
@@ -227,7 +238,7 @@ Follow project conventions:
 > **📖 See [Code Simplifier Integration Pattern](../shared/code-simplifier-integration.md)** for complete integration guide (Tier 1: ALWAYS).
 
 ```
-Task tool with subagent_type: "code-simplifier"
+Agent tool with subagent_type: "code-simplifier"
 prompt: "Review and optimize this spec file for performance and clarity:
   - Prefer build over create
   - Remove redundant test setup
@@ -253,7 +264,7 @@ The code-simplifier agent will:
 ### Step 5: Validate Specs
 
 ```bash
-docker compose exec web bundle exec rake 'coverage:validate:quick[spec/path_spec.rb]'
+bin/d rake 'coverage:validate:quick[spec/path_spec.rb]'
 ```
 
 ### Step 6: Run Specs with SimpleCov
@@ -266,7 +277,7 @@ docker compose exec -e SIMPLECOV_REPORT=true web bundle exec rspec spec/path_spe
 
 ```bash
 # Check overall file coverage
-docker compose exec web bundle exec rake 'coverage:local:file[app/models/membership.rb]'
+bin/d rake 'coverage:local:file[app/models/membership.rb]'
 ```
 
 Then manually verify that ALL lines from Step 2 are covered.
@@ -286,14 +297,14 @@ For improving overall coverage (not PR-specific):
 
 1. **Find uncovered files**
    ```bash
-   docker compose exec web bundle exec rake 'coverage:local:uncovered[10]'
+   bin/d rake 'coverage:local:uncovered[10]'
    ```
 
 2. **Pick top priority file** and read it
 
 3. **Write specs** and verify total coverage:
    ```bash
-   docker compose exec web bundle exec rake 'coverage:local:file[app/path/to/file.rb]'
+   bin/d rake 'coverage:local:file[app/path/to/file.rb]'
    ```
 
 ## Coverage Verification (MANDATORY)
@@ -310,7 +321,7 @@ docker compose exec -e SIMPLECOV_REPORT=true web bundle exec rspec spec/path_spe
 git diff develop...HEAD --unified=0 -- app/models/membership.rb | grep "^@@"
 
 # 3. Check file coverage
-docker compose exec web bundle exec rake 'coverage:local:file[app/models/membership.rb]'
+bin/d rake 'coverage:local:file[app/models/membership.rb]'
 
 # 4. Read coverage/coverage.json for detailed line-by-line data
 # Lines with 0 are uncovered, lines with null are non-executable
@@ -332,7 +343,7 @@ docker compose exec web bundle exec rake 'coverage:local:file[app/models/members
 
 ```bash
 # Check total coverage for a file
-docker compose exec web bundle exec rake 'coverage:local:file[app/models/user.rb]'
+bin/d rake 'coverage:local:file[app/models/user.rb]'
 ```
 
 ## Forbidden Patterns
@@ -477,7 +488,7 @@ Claude:
    65 examples, 0 failures
 
 4. Checking coverage for changed lines...
-   $ docker compose exec web bundle exec rake 'coverage:local:file[app/models/membership.rb]'
+   $ bin/d rake 'coverage:local:file[app/models/membership.rb]'
    Coverage: 42% (155/367 lines)
 
    Cross-referencing with git diff:
@@ -559,7 +570,7 @@ git diff develop...HEAD --unified=0 -- app/models/membership.rb | grep "^@@"
 
 # Check coverage
 docker compose exec -e SIMPLECOV_REPORT=true web bundle exec rspec spec/...
-docker compose exec web bundle exec rake 'coverage:local:file[app/models/membership.rb]'
+bin/d rake 'coverage:local:file[app/models/membership.rb]'
 ```
 
 **Target**: 83.52% patch coverage (Codecov default threshold)
@@ -594,7 +605,7 @@ docker compose exec -e SIMPLECOV_REPORT=true web bundle exec rspec
 # Check total % is >= develop baseline
 
 # 3. If project coverage drops, add compensating tests:
-docker compose exec web bundle exec rake 'coverage:local:uncovered[10]'
+bin/d rake 'coverage:local:uncovered[10]'
 # Pick related or easy-win files and add tests
 ```
 
@@ -619,7 +630,7 @@ docker compose exec web bundle exec rake 'coverage:local:uncovered[10]'
 
 ```bash
 # STEP 0: ALWAYS run tests first to ensure they pass
-docker compose exec -e RAILS_ENV=test web bundle exec rspec spec/path_spec.rb
+bin/d rspec spec/path_spec.rb
 
 # If tests fail, FIX THEM before worrying about coverage
 # Common flaky test issues:
@@ -701,7 +712,7 @@ gh api repos/PlaybyCourt/platform/issues/<PR_NUMBER>/comments \
 # - If Misses increased: New uncovered code exists
 
 # 3. For tiny drops, add 1-2 simple tests to ANY low-coverage file
-docker compose exec web bundle exec rake 'coverage:local:uncovered[5]'
+bin/d rake 'coverage:local:uncovered[5]'
 # Pick the top file and add a simple test for an uncovered line
 ```
 

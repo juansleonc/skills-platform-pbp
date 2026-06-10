@@ -441,7 +441,7 @@ ORDER BY hour;
 # tmp/debug_issue.rb
 #
 # Purpose: Reproduce issue #XXX - [description]
-# Usage: docker compose exec web bundle exec rails runner tmp/debug_issue.rb
+# Usage: bin/d rails runner tmp/debug_issue.rb
 
 # 1. Set up test data
 facility = Facility.find(123)
@@ -905,7 +905,7 @@ starts = membership.acquired_at ? membership.acquired_at.strftime('%Y-%m-%d %H:%
 
 ```bash
 # ALWAYS test locally first
-docker compose exec web bundle exec rails runner "
+bin/d rails runner "
   # Your script here
   puts 'Test output'
 "

@@ -185,13 +185,13 @@ rescue StandardError => e  # Acceptable when you need broad catch
 
 ```bash
 # Full scan
-docker compose exec web bundle exec brakeman
+bin/d brakeman
 
 # Scan specific files
-docker compose exec web bundle exec brakeman --only-files app/controllers/payments_controller.rb
+bin/d brakeman --only-files app/controllers/payments_controller.rb
 
 # Output to JSON for processing
-docker compose exec web bundle exec brakeman -f json -o tmp/brakeman.json
+bin/d brakeman -f json -o tmp/brakeman.json
 ```
 
 ### Step 2: Check for Common Vulnerabilities
@@ -714,7 +714,7 @@ Claude:
 ## Security Audit
 
 ### Running Brakeman...
-docker compose exec web bundle exec brakeman --only-files <changed_files>
+bin/d brakeman --only-files <changed_files>
 
 Results:
 - High: 0

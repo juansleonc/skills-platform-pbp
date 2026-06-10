@@ -97,7 +97,7 @@ Autonomous workflow for improving test coverage:
 **Commands**:
 ```bash
 # Find uncovered files
-docker compose exec web bundle exec rake 'coverage:local:uncovered[10]'
+bin/d rake 'coverage:local:uncovered[10]'
 
 # Returns (sorted by uncovered lines):
 # app/models/membership.rb: 45 lines uncovered
@@ -218,7 +218,7 @@ end
 
 ```bash
 # Validate spec for factory rules
-docker compose exec web bundle exec rake 'coverage:validate:quick[spec/models/membership_spec.rb]'
+bin/d rake 'coverage:validate:quick[spec/models/membership_spec.rb]'
 
 # Checks for:
 # ❌ allow_any_instance_of (FORBIDDEN)
@@ -244,7 +244,7 @@ docker compose exec web bundle exec rake 'coverage:validate:quick[spec/models/me
 
 ```bash
 # Run the spec
-docker compose exec web bundle exec rspec spec/models/membership_spec.rb
+bin/d rspec spec/models/membership_spec.rb
 
 # Expected output:
 # 15 examples, 0 failures
@@ -263,7 +263,7 @@ docker compose exec web bundle exec rspec spec/models/membership_spec.rb
 
 ```bash
 # Verify coverage improved
-docker compose exec web bundle exec rake 'coverage:local:delta'
+bin/d rake 'coverage:local:delta'
 
 # Returns:
 # Files with coverage changes:
@@ -292,7 +292,7 @@ docker compose exec web bundle exec rake 'coverage:local:delta'
 **Command**:
 ```bash
 # Verify specific file
-docker compose exec web bundle exec rake 'coverage:local:file[app/models/membership.rb]'
+bin/d rake 'coverage:local:file[app/models/membership.rb]'
 
 # Expected output:
 # Coverage: 100% (45/45 lines)
@@ -548,7 +548,7 @@ let(:facility) { create(:facility) }  # OK if intentional
 **Solution**:
 ```bash
 # Run with detailed report
-docker compose exec -e SIMPLECOV_REPORT=true web bundle exec rspec spec/path_spec.rb
+docker compose exec -e SIMPLECOV_REPORT=true web bundle exec rspec spec/path_spec.rb  # bin/d rspec for plain run
 
 # Check tmp/coverage/index.html in browser
 # Shows exact uncovered line numbers

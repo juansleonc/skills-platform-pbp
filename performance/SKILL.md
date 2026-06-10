@@ -1,7 +1,7 @@
 ---
 name: performance
 description: Detects N+1 queries, missing indexes, memory issues, and slow operations. Validates performance patterns for Rails, GraphQL, and Sidekiq.
-allowed-tools: [Bash, Read, Grep, Glob, Task, Edit, mcp__clickhouse__run_select_query, mcp__clickhouse__list_tables, mcp__opensearch__*, mcp__rails__*, mcp__ide__executeCode, mcp__ide__getDiagnostics]
+allowed-tools: [Bash, Read, Grep, Glob, Agent, Edit, mcp__clickhouse__run_select_query, mcp__clickhouse__list_tables, mcp__opensearch__*, mcp__rails__*, mcp__ide__executeCode, mcp__ide__getDiagnostics]
 disable-model-invocation: false
 ---
 
@@ -512,7 +512,7 @@ LIMIT 20;
 > **📖 See [Code Simplifier Integration Pattern](../shared/code-simplifier-integration.md)** for complete integration guide (Tier 2: MANDATORY).
 
 ```
-Task tool:
+Agent tool:
   subagent_type: "code-simplifier"
   prompt: |
     Review these files for performance optimization:

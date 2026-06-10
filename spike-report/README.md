@@ -31,7 +31,7 @@ Generate beautiful, interactive HTML reports for technical spikes in 30 minutes 
 ## 📤 Output
 
 ```
-docs/spikes/
+investigations/spikes/   ← gitignored via .git/info/exclude (NOT docs/)
 ├── SPIKE_[name]_2026-02-10.html  ← Interactive report (1,200+ lines)
 └── SPIKE_[name]_2026-02-10.md    ← Summary for quick reference
 ```

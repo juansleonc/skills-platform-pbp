@@ -296,7 +296,7 @@ membership.destroy
 
 **Verification**:
 ```bash
-docker compose exec web bundle exec rails runner tmp/debug_weekly_renewal.rb
+bin/d rails runner tmp/debug_weekly_renewal.rb
 
 # Expected output:
 # Testing renewal_date...

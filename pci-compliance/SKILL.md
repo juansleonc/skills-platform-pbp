@@ -96,7 +96,7 @@ grep -rn "verify_ssl.*false\|ssl_verify.*false\|verify_peer.*false" app/ --inclu
 
 ```bash
 # 1. Run Brakeman on payment code
-docker compose exec web bundle exec brakeman --only-files app/services/payment_service/,app/adapters/,app/controllers/*payment*
+bin/d brakeman --only-files app/services/payment_service/,app/adapters/,app/controllers/*payment*
 
 # 2. Check for SQL injection in payment queries
 grep -rn "where(\".*\#{" app/services/payment_service/ --include="*.rb"
@@ -181,7 +181,7 @@ echo "3. Checking for sensitive data logging..."
 grep -rn "Rails.logger\|Honeybadger.context" app/ --include="*.rb" | grep -i "card\|cvv\|password\|token"
 
 echo "4. Running Brakeman on payment code..."
-docker compose exec web bundle exec brakeman --only-files app/services/payment_service/,app/adapters/ -q
+bin/d brakeman --only-files app/services/payment_service/,app/adapters/ -q
 ```
 
 ### Step 2: ClickHouse Data Verification

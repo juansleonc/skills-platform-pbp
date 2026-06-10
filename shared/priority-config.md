@@ -85,8 +85,7 @@ bundle exec rspec spec/models/user_spec.rb
 **CLAUDE.local.md says**:
 ```bash
 # ✅ SIEMPRE usar Docker
-docker compose exec web bundle exec rspec spec/models/user_spec.rb
-# O usar: bin/d rspec spec/models/user_spec.rb
+bin/d rspec spec/models/user_spec.rb
 ```
 
 **Claude uses**: CLAUDE.local.md (Docker) ✅
@@ -103,10 +102,10 @@ bundle exec pronto run -c develop
 **CLAUDE.local.md says**:
 ```bash
 # Archivos MODIFICADOS → Pronto
-docker compose exec web bundle exec pronto run -c develop
+bin/d pronto run -c develop
 
 # Archivos NUEVOS → RuboCop
-docker compose exec web bundle exec rubocop -A new_file.rb
+bin/d rubocop -A new_file.rb
 ```
 
 **Claude uses**: CLAUDE.local.md (modified files use Pronto) ✅

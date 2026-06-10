@@ -11,7 +11,7 @@ triggers:
     - /spike-report
     - /spike-report [name] [type]
     - /spike-report --sections [sections]
-related_skills: [architect, openspec-new-change, code-review]
+related_skills: [architect, opsx:new, code-review]
 ---
 
 > **📋 Config Priority**: `CLAUDE.local.md` overrides `CLAUDE.md` for local settings (Docker, linting, coverage). Always check both files for current project conventions.
@@ -168,7 +168,7 @@ None. This skill requires manual invocation to generate reports.
 │  │ • Validate HTML/CSS/SVG syntax               │      │
 │  │ • Check accessibility (ARIA labels)          │      │
 │  │ • Ensure responsive design (mobile test)     │      │
-│  │ • Save to docs/spikes/SPIKE_[name]_[date].html│     │
+│  │ • Save to investigations/spikes/SPIKE_[name]_[date].html│  │
 │  │ • Generate markdown summary (.md companion)  │      │
 │  │ • Present preview file:// URL                │      │
 │  └──────────────────────────────────────────────┘      │
@@ -571,11 +571,11 @@ end
 **Save Files**:
 
 ```bash
-# 1. HTML report
-Write: "docs/spikes/SPIKE_{spike_name}_{date}.html"
+# 1. HTML report (gitignored via .git/info/exclude — personal artifact, NOT docs/)
+Write: "investigations/spikes/SPIKE_{spike_name}_{date}.html"
 
 # 2. Markdown summary (companion)
-Write: "docs/spikes/SPIKE_{spike_name}_{date}.md"
+Write: "investigations/spikes/SPIKE_{spike_name}_{date}.md"
 Content:
 ```markdown
 # SPIKE: {spike_name}
@@ -607,7 +607,7 @@ See interactive HTML report: `SPIKE_{spike_name}_{date}.html`
 ```
 
 # 3. Preview
-output: "✅ Report generated: file:///path/to/docs/spikes/SPIKE_{spike_name}_{date}.html"
+output: "✅ Report generated: file:///path/to/investigations/spikes/SPIKE_{spike_name}_{date}.html"
 ```
 
 ## Examples
@@ -633,9 +633,9 @@ output: "✅ Report generated: file:///path/to/docs/spikes/SPIKE_{spike_name}_{d
 6. 🔍 Gap Analysis (current vs proposed)
 
 # Output
-✅ Generated: docs/spikes/SPIKE_RBAC_Permissions_2026-02-10.html (1,234 lines)
-📝 Summary: docs/spikes/SPIKE_RBAC_Permissions_2026-02-10.md
-📊 Preview: file:///Users/leon/workspace/pbp/platform/docs/spikes/SPIKE_RBAC_Permissions_2026-02-10.html
+✅ Generated: investigations/spikes/SPIKE_RBAC_Permissions_2026-02-10.html (1,234 lines)
+📝 Summary: investigations/spikes/SPIKE_RBAC_Permissions_2026-02-10.md
+📊 Preview: file:///Users/leon/workspace/pbp/platform/investigations/spikes/SPIKE_RBAC_Permissions_2026-02-10.html
 
 Time: 28 minutes (vs 2.5 hours manual)
 ```
@@ -658,7 +658,7 @@ Time: 28 minutes (vs 2.5 hours manual)
 4. ⚠️ Risks & Mitigations (breaking changes, rollback)
 
 # Output
-✅ Generated: docs/spikes/SPIKE_Payment_Gateway_Consolidation_2026-02-10.html (856 lines)
+✅ Generated: investigations/spikes/SPIKE_Payment_Gateway_Consolidation_2026-02-10.html (856 lines)
 ```
 
 ### Example 3: Performance Spike (N+1 Query Fixes)
@@ -679,7 +679,7 @@ Time: 28 minutes (vs 2.5 hours manual)
 4. 🏁 Benchmarks (before: 250ms, after: 80ms)
 
 # Output
-✅ Generated: docs/spikes/SPIKE_N1_Query_Optimization_2026-02-10.html (645 lines)
+✅ Generated: investigations/spikes/SPIKE_N1_Query_Optimization_2026-02-10.html (645 lines)
 ```
 
 ## Customization Options
@@ -713,10 +713,10 @@ integration → teal/blue (connection, flow)
 ### Output Location
 
 ```bash
-# Default: docs/spikes/
+# Default: investigations/spikes/  (gitignored via .git/info/exclude — NOT docs/)
 # Can be customized:
-/spike-report --output docs/proposals/
-/spike-report --output tmp/reports/  # For drafts
+/spike-report --output investigations/proposals/
+/spike-report --output tmp/reports/  # For quick drafts
 ```
 
 ## Integration with Other Skills
@@ -730,11 +730,11 @@ integration → teal/blue (connection, flow)
 # ... report includes architect's decisions ...
 ```
 
-### With /openspec-new-change
+### With /opsx:new
 ```bash
 # Create OpenSpec change, then generate report for stakeholders
-/openspec-new-change rbac-redesign
-/openspec-ff rbac-redesign
+/opsx:new rbac-redesign
+/opsx:ff rbac-redesign
 # ... OpenSpec creates artifacts ...
 /spike-report rbac-redesign architecture
 # ... report complements OpenSpec docs ...
@@ -754,7 +754,7 @@ integration → teal/blue (connection, flow)
 | Skill | Relationship |
 |-------|--------------|
 | `/architect` | Architect defines structure → spike-report visualizes it |
-| `/openspec-new-change` | OpenSpec creates specs → spike-report creates stakeholder docs |
+| `/opsx:new` | OpenSpec creates specs → spike-report creates stakeholder docs |
 | `/code-review` | Code review finds issues → spike-report documents solutions |
 | `/tdd` | TDD ensures correctness → spike-report documents behavior |
 | `/debug` | Debug finds root causes → spike-report documents fix strategy |
@@ -865,7 +865,7 @@ Next improvements needed:
 - [ ] Add D3.js integration for more complex interactive diagrams
 - [ ] Support Mermaid diagram conversion (markdown → SVG)
 - [ ] Add PDF export option (for offline sharing)
-- [ ] Create gallery of example reports (docs/spikes/examples/)
+- [ ] Create gallery of example reports (investigations/spikes/examples/)
 - [ ] Add real-time preview server (live reload during generation)
 - [ ] Support custom themes (dark mode, company branding)
 

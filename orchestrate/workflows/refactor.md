@@ -409,7 +409,7 @@ end
 #### 3.2 GREEN: Verify Tests Pass (Baseline)
 
 ```bash
-docker compose exec web bundle exec rspec spec/services/membership_service_spec.rb
+bin/d rspec spec/services/membership_service_spec.rb
 
 # Expected: All tests pass (baseline behavior)
 # 8 examples, 0 failures
@@ -539,7 +539,7 @@ end
 #### 3.4 GREEN: Verify Tests Still Pass
 
 ```bash
-docker compose exec web bundle exec rspec spec/services/membership_service_spec.rb
+bin/d rspec spec/services/membership_service_spec.rb
 
 # Expected: All tests still pass
 # 8 examples, 0 failures
@@ -554,7 +554,7 @@ docker compose exec web bundle exec rspec spec/services/membership_service_spec.
 #### 3.5 COVERAGE: Verify 100% Maintained
 
 ```bash
-docker compose exec web bundle exec rake 'coverage:local:file[app/services/membership_service.rb]'
+bin/d rake 'coverage:local:file[app/services/membership_service.rb]'
 
 # Expected: Coverage: 100% (50/50 lines)
 ```
@@ -574,7 +574,7 @@ Verify improvements achieved (~5-7min total):
 #### 4.1 Coverage Verification
 
 ```bash
-docker compose exec web bundle exec rake 'coverage:local:delta'
+bin/d rake 'coverage:local:delta'
 
 # Expected: No coverage regression
 # Ideally: Coverage improved (if refactoring uncovered edge cases)
@@ -603,7 +603,7 @@ docker compose exec web bundle exec rake 'coverage:local:delta'
 #### 4.3 Lint Verification
 
 ```bash
-docker compose exec web bundle exec pronto run -c develop
+bin/d pronto run -c develop
 
 # Expected: No new violations
 # Ideally: Violations reduced (if refactoring fixed style issues)

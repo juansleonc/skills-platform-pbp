@@ -119,7 +119,7 @@ grep -oiE "[0-9]+ Packwerk packages" .claude/skills/packwerk/skill.md
 grep -E "^(test|console|migrate|web-bash):" Makefile
 
 # Verify rake tasks exist
-docker compose exec web bundle exec rake -T coverage
+bin/d rake -T coverage
 ```
 
 ## Audit Report Format

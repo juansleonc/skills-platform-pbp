@@ -96,7 +96,7 @@ Create well-formatted git commits following the project's conventional commit st
 
 Extract ticket from branch name for scope:
 - `feature/CORE-123-description` → scope includes `CORE-123`
-- `PLA-456-fix-bug` → scope includes `PLA-456`
+- `feature/PLA-456-fix-bug` → scope includes `PLA-456`
 
 ## Rules
 

@@ -184,7 +184,7 @@ end
 **Solution**: Manual cleanup
 ```bash
 # Reset structure.sql to develop
-git checkout develop db/structure.sql
+git checkout origin/develop -- db/structure.sql
 
 # Add only YOUR changes
 # - Your new column/index
@@ -223,11 +223,11 @@ docker compose exec -e SIMPLECOV_REPORT=true web bundle exec rspec spec/...
 # Must: 100% patch coverage verified line-by-line
 
 # 3. Lint (MANDATORY for modified files) +10%
-docker compose exec web bundle exec pronto run -c develop
+bin/d pronto run -c develop
 # Must: Clean
 
 # 4. Security (MANDATORY for models/services/controllers) +10%
-docker compose exec web bundle exec brakeman --only-files app/...
+bin/d brakeman --only-files app/...
 # Must: No new vulnerabilities
 ```
 

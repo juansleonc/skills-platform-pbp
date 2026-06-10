@@ -141,7 +141,7 @@ Total Time: 18min 59s
 | Mistake | Fix |
 |---------|-----|
 | Running /commit from orchestrate | ❌ orchestrate CANNOT commit. Tell user to run /commit |
-| Not using Task tool for parallel skills | Use Task tool with multiple parallel invocations |
+| Not using Agent tool for parallel skills | Use Agent tool with multiple parallel invocations |
 | Running all validators on small fixes | Use workflow-intelligence to select relevant validators |
 | Proceeding after quality gate failure | STOP, report failures, wait for fixes |
 

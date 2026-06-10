@@ -54,7 +54,7 @@ Every safe script follows this structure:
 # Author: [Your name]
 #
 # Testing:
-#   docker compose exec web bundle exec rails runner scripts/fix_name.rb
+#   bin/d runner scripts/fix_name.rb
 #
 # Production:
 #   RAILS_ENV=production bundle exec rails runner scripts/fix_name.rb
@@ -317,10 +317,10 @@ Questions to answer:
 
 ```bash
 # First, check syntax
-docker compose exec web ruby -c scripts/fix_membership_payments.rb
+bin/d ruby -c scripts/fix_membership_payments.rb
 
 # Run in dry-run mode (default)
-docker compose exec web bundle exec rails runner scripts/fix_membership_payments.rb
+bin/d runner scripts/fix_membership_payments.rb
 
 # Check output - should show:
 # - Number of records to change
@@ -337,7 +337,7 @@ docker compose exec -e RAILS_ENV=test web bundle exec rails runner \
   scripts/fix_membership_payments.rb
 
 # Verify changes
-docker compose exec web bundle exec rails runner "
+bin/d runner "
   # Check specific records
   puts MembershipPayment.where(payment_id: 123).inspect
 "

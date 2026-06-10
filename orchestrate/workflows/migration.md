@@ -281,6 +281,9 @@ FROM pbp_productionDB_optimized.reservations;
 **Critical Pattern**: UP → DOWN → UP
 
 ```bash
+# Preferred wrapper for plain commands: bin/d migrate / bin/d rails db:migrate:down ...
+# For RAILS_ENV=test (db commands), use docker compose exec -e explicitly (bin/d auto-sets RAILS_ENV=test only for rspec):
+
 # Step 1: Run migration up
 docker compose exec -e RAILS_ENV=test web bundle exec rails db:migrate
 

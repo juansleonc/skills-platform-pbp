@@ -1,7 +1,7 @@
 ---
 name: code-review
 description: Use when reviewing a diff or branch for correctness, conventions, security, and performance before merge.
-allowed-tools: [Bash, Read, Grep, Glob, Task, Edit, mcp__github__*, mcp__context7__resolve-library-id, mcp__context7__query-docs, mcp__clickhouse__run_select_query, mcp__clickhouse__list_tables, mcp__honeybadger__list_faults, mcp__honeybadger__get_fault, mcp__sentry__sentry_list_projects, mcp__sentry__sentry_list_issues, mcp__sentry__sentry_get_issue, mcp__sentry__sentry_get_issue_events, mcp__mermaid__*, mcp__opensearch__*, mcp__ide__executeCode, mcp__ide__getDiagnostics]
+allowed-tools: [Bash, Read, Grep, Glob, Agent, Edit, mcp__github__*, mcp__context7__resolve-library-id, mcp__context7__query-docs, mcp__clickhouse__run_select_query, mcp__clickhouse__list_tables, mcp__honeybadger__list_faults, mcp__honeybadger__get_fault, mcp__sentry__sentry_list_projects, mcp__sentry__sentry_list_issues, mcp__sentry__sentry_get_issue, mcp__sentry__sentry_get_issue_events, mcp__mermaid__*, mcp__opensearch__*, mcp__ide__executeCode, mcp__ide__getDiagnostics]
 disable-model-invocation: false
 ---
 
@@ -612,7 +612,7 @@ mcp__sentry__sentry_get_issue:
 **ALWAYS run code-simplifier for any non-trivial changes:**
 
 ```
-Task tool:
+Agent tool:
   subagent_type: "code-simplifier"
   prompt: |
     Review these files for performance and clarity:
@@ -655,13 +655,13 @@ Task tool:
 
 ```bash
 # Pronto - for modified files
-docker compose exec web bundle exec pronto run -c develop
+bin/d pronto run -c develop
 
 # RuboCop - ONLY for new files
-docker compose exec web bundle exec rubocop -A path/to/new_file.rb
+bin/d rubocop -A path/to/new_file.rb
 
 # Brakeman for security
-docker compose exec web bundle exec brakeman --only-files <files>
+bin/d brakeman --only-files <files>
 ```
 
 ## Review Dimensions

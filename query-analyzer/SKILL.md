@@ -42,7 +42,7 @@ grep -rn "\.where\|\.joins\|\.includes" app/models/ app/services/ app/controller
 
 ```bash
 # In Docker Rails console
-docker compose exec web bundle exec rails console
+bin/d rails console
 
 # Get EXPLAIN for a query
 query = User.joins(:facility).where(active: true, facility_id: 123)
@@ -72,7 +72,7 @@ puts query.explain
 
 ```bash
 # Check existing indexes
-docker compose exec web bundle exec rails runner "
+bin/d rails runner "
   conn = ActiveRecord::Base.connection
   puts conn.indexes('users').map { |i| [i.name, i.columns].join(': ') }
 "
@@ -187,7 +187,7 @@ end
 
 ```ruby
 # If missing indexes detected, generate migration
-docker compose exec web bundle exec rails generate migration AddIndexToReservations
+bin/d rails generate migration AddIndexToReservations
 
 # Add to migration file:
 class AddIndexToReservations < ActiveRecord::Migration[6.1]

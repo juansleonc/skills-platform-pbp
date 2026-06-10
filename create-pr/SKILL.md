@@ -100,8 +100,8 @@ EOF
 - Extract ticket from branch name (e.g., `CORE-121`)
 - NEVER push without user confirmation
 - Include all commits in summary, not just the latest
-- Run `docker compose exec web bundle exec pronto run -c develop` for modified files (preserves legacy)
-- Run `docker compose exec web bundle exec rubocop -A` ONLY for new files
+- Run `bin/d pronto run -c develop` for modified files (preserves legacy)
+- Run `bin/d rubocop -A` ONLY for new files
 
 ## Example
 

@@ -1,7 +1,7 @@
 ---
 name: tdd
 description: MANDATORY for all code changes — triggers when implementing features, fixing bugs, modifying existing behavior, adding guards, or changing any code that requires behavioral verification.
-allowed-tools: [Bash, Read, Write, Edit, Grep, Glob, Task, mcp__context7__resolve-library-id, mcp__context7__query-docs]
+allowed-tools: [Bash, Read, Write, Edit, Grep, Glob, Agent, mcp__context7__resolve-library-id, mcp__context7__query-docs]
 disable-model-invocation: false
 ---
 
@@ -99,7 +99,7 @@ mcp__context7__query-docs:
 **ALWAYS run code-simplifier agent on new test files:**
 
 ```
-Task tool with subagent_type: "code-simplifier"
+Agent tool with subagent_type: "code-simplifier"
 prompt: "Review and optimize this spec file for performance and clarity:
   - Prefer build over create
   - Remove redundant test setup
@@ -138,7 +138,7 @@ make test TEST_PATH="spec/models/user_spec.rb spec/services/"
 
 # All specs (parallel) - PREFERRED
 make test-all
-# OR: docker compose exec web bundle exec rails parallel:spec
+# OR: bin/d rails parallel:spec
 ```
 
 ## Workflow
@@ -302,13 +302,13 @@ bin/d bundle exec pronto run -r rubocop -c develop -f text
 
 ```bash
 # Run with SimpleCov
-docker compose exec -e SIMPLECOV_REPORT=true web bundle exec rspec spec/path_spec.rb
+docker compose exec -e SIMPLECOV_REPORT=true web bundle exec rspec spec/path_spec.rb  # bin/d rspec for plain run
 
 # Check coverage for specific file
-docker compose exec web bundle exec rake 'coverage:local:file[app/path/to/file.rb]'
+bin/d rake 'coverage:local:file[app/path/to/file.rb]'
 
 # Verify delta
-docker compose exec web bundle exec rake 'coverage:local:delta'
+bin/d rake 'coverage:local:delta'
 ```
 
 **Evidence gate before declaring done (two net-new items — tests/lint/coverage are already covered above):**
@@ -463,7 +463,7 @@ PARALLEL_TEST_PROCESSORS=4 bin/test_system
 PLAYWRIGHT_HEADLESS=false bin/test_system
 
 # Single test
-docker compose exec -e RAILS_ENV=test web bundle exec rspec system_specs/features/admin_login_spec.rb
+bin/d rspec system_specs/features/admin_login_spec.rb
 ```
 
 ### System Test File Structure

@@ -287,7 +287,7 @@ end
 # ✅ CORRECT - Docker execution
 bin/d rspec spec/models/user_spec.rb
 make test TEST_PATH=spec/...
-docker compose exec web bundle exec rails c
+bin/d rails c
 
 # ✅ CORRECT - For multiple commands
 docker compose exec web bash
@@ -376,9 +376,9 @@ system("git push origin feature-branch")
 ### Correct Format
 
 ```bash
-# ✅ CORRECT - Clean commit message
-git commit -m "PLA-123 | fix: Handle nil case in payment validation"
-git commit -m "CORE-456 | feat: Add GraphQL mutation for user update"
+# ✅ CORRECT - Clean commit message with gitmoji
+git commit -m "PLA-123 | 🐛 fix: Handle nil case in payment validation"
+git commit -m "CORE-456 | ✨ feat: Add GraphQL mutation for user update"
 ```
 
 ### Forbidden Patterns
@@ -413,10 +413,10 @@ Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
 
 ```bash
 # ✅ CORRECT - Verify coverage
-docker compose exec web bundle exec rake 'coverage:local:file[app/models/user.rb]'
+bin/d rake 'coverage:local:file[app/models/user.rb]'
 # Expected output: "Coverage: 100%"
 
-docker compose exec web bundle exec rake 'coverage:local:delta'
+bin/d rake 'coverage:local:delta'
 # Expected: "Patch coverage: 100%"
 ```
 

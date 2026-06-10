@@ -197,7 +197,7 @@ Before pruning, verify: re-run RED with the section removed. If behavior is unch
 ```markdown
 ❌ BAD: "Check the code for issues"
 ✅ GOOD: "Run Brakeman to detect OWASP Top 10 vulnerabilities:
-         docker compose exec web bundle exec brakeman
+         bin/d brakeman
          Expected: Exit code 0, no new vulnerabilities"
 ```
 
@@ -207,7 +207,7 @@ Before pruning, verify: re-run RED with the section removed. If behavior is unch
 
 ```markdown
 ❌ BAD: Run 5 sequential commands that could be parallel
-✅ GOOD: Mark independent tasks for parallel execution with Task tool
+✅ GOOD: Mark independent tasks for parallel execution with Agent tool
 ```
 
 ### 3. Reliability Issues
@@ -225,7 +225,7 @@ Before pruning, verify: re-run RED with the section removed. If behavior is unch
 
 ```markdown
 ❌ BAD: "Verify coverage"
-✅ GOOD: "Run: docker compose exec web bundle exec rake 'coverage:local:file[app/models/user.rb]'
+✅ GOOD: "Run: bin/d rake 'coverage:local:file[app/models/user.rb]'
          Expected output: 'Coverage: 100%'"
 ```
 
@@ -293,7 +293,7 @@ Look for opportunities to parallelize or skip unnecessary steps:
 ```markdown
 Example: Can analysis skills run in parallel?
 - /timezone, /packwerk, /security are independent
-- Can use Task tool with parallel: true
+- Can use Agent tool with parallel: true
 - Update /orchestrate workflow map
 ```
 

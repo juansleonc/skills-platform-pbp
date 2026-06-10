@@ -98,8 +98,8 @@ make test TEST_PATH=spec/models/user_spec.rb,spec/services/payment_service_spec.
 
 **Command**:
 ```bash
-docker compose exec -e SIMPLECOV_REPORT=true web bundle exec rspec <changed_specs>
-docker compose exec web bundle exec rake 'coverage:local:delta'
+docker compose exec -e SIMPLECOV_REPORT=true web bundle exec rspec <changed_specs>  # bin/d rspec for plain run
+bin/d rake 'coverage:local:delta'
 ```
 
 **What it checks**:
@@ -118,7 +118,7 @@ docker compose exec web bundle exec rake 'coverage:local:delta'
 
 **Command**:
 ```bash
-docker compose exec web bundle exec pronto run -c develop
+bin/d pronto run -c develop
 ```
 
 **What it checks**:
@@ -152,7 +152,7 @@ grep -rn "Time\.now" <changed_files>
 
 **Command**:
 ```bash
-docker compose exec web bundle exec brakeman --fast --only-files <changed_files>
+bin/d brakeman --fast --only-files <changed_files>
 ```
 
 **What it checks**:

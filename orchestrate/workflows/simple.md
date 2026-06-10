@@ -126,7 +126,7 @@ Streamlined workflow for:
 #### 1.1 Syntax Check
 ```bash
 # Ruby syntax validation
-docker compose exec web ruby -c app/models/user.rb
+bin/d ruby -c app/models/user.rb
 
 # Expected output: "Syntax OK"
 ```

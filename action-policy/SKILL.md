@@ -18,7 +18,7 @@ Run this skill when:
 
 ## Shared References
 
-> - [Authorization Architecture](docs/architecture/authorization-action-policy.md) - comprehensive guide
+> - [Authorization Architecture](docs/architecture/authorization-pundit.md) - comprehensive guide
 > - [Critical Rules](../shared/critical-rules.md) - security rules
 > - [Forbidden Patterns](../shared/forbidden-patterns.md) - patterns to avoid
 > - Use `Grep` and `Glob` for policy hierarchy and reference lookup (Serena removed 2026-06-02)

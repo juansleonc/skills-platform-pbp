@@ -1,7 +1,7 @@
 ---
 name: architect
 description: Use when designing a new feature, pack, service, schema, or integration before implementation begins.
-allowed-tools: [Bash, Read, Grep, Glob, Task, mcp__context7__resolve-library-id, mcp__context7__query-docs, mcp__clickhouse__run_select_query, mcp__clickhouse__list_tables, mcp__clickhouse__list_databases, mcp__mermaid__*, mcp__ide__executeCode, mcp__ide__getDiagnostics]
+allowed-tools: [Bash, Read, Grep, Glob, Agent, mcp__context7__resolve-library-id, mcp__context7__query-docs, mcp__clickhouse__run_select_query, mcp__clickhouse__list_tables, mcp__clickhouse__list_databases, mcp__mermaid__*, mcp__ide__executeCode, mcp__ide__getDiagnostics]
 disable-model-invocation: false
 ---
 
@@ -218,10 +218,10 @@ grep -rn "class.*Mutation" app/graphql/mutations/ --include="*.rb"
 
 > Use `Grep` and `Glob` for symbol-level discovery. (Serena removed 2026-06-02.)
 
-**Use Task agent for deep exploration:**
+**Use Agent for deep exploration:**
 
 ```
-Task tool:
+Agent tool:
   subagent_type: "Explore"
   prompt: "Find all code related to <feature>. I need to understand:
     1. Where similar features live (models, services, jobs)

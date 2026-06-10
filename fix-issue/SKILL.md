@@ -71,18 +71,18 @@ Analyze a GitHub issue, implement the solution, and create tests.
 7. **Validate** (all commands in Docker web container)
    ```bash
    # Run tests WITH coverage
-   docker compose exec -e SIMPLECOV_REPORT=true web bundle exec rspec <affected_specs>
+   docker compose exec -e SIMPLECOV_REPORT=true web bundle exec rspec <affected_specs>  # bin/d rspec for plain run
 
    # For MODIFIED files - Pronto (preserves legacy code)
-   docker compose exec web bundle exec pronto run -c develop
+   bin/d pronto run -c develop
 
    # For NEW files only - RuboCop full lint
-   docker compose exec web bundle exec rubocop -A <new_files>
+   bin/d rubocop -A <new_files>
    ```
 
 8. **Verify 100% coverage on changes** (MANDATORY)
    ```bash
-   docker compose exec web bundle exec rake 'coverage:local:file[<changed_file>]'
+   bin/d rake 'coverage:local:file[<changed_file>]'
    # Must show 100% coverage on the changed file
    ```
 

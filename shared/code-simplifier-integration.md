@@ -43,7 +43,7 @@ Provides standardized patterns for integrating the `code-simplifier` agent into 
 
 **ALWAYS run code-simplifier on new code:**
 
-Task tool with subagent_type: "code-simplifier"
+Agent tool with subagent_type: "code-simplifier"
 prompt: "[tier 1 prompt - see below]"
 
 ## Step N+2: Validate
@@ -72,7 +72,7 @@ prompt: "[tier 1 prompt - see below]"
 
 **ALWAYS run code-simplifier for non-trivial changes:**
 
-Task tool:
+Agent tool:
   subagent_type: "code-simplifier"
   prompt: "[tier 2 prompt - see below]"
 
@@ -110,7 +110,7 @@ Task tool:
 Ask user: "Apply optimizations with code-simplifier? (y/n)"
 
 If yes:
-  Task tool:
+  Agent tool:
     subagent_type: "code-simplifier"
     prompt: "[tier 3 prompt - see below]"
 
@@ -130,7 +130,7 @@ If no:
 ### For Test Files (Tier 1 - /tdd, /coverage)
 
 ```
-Task tool with subagent_type: "code-simplifier"
+Agent tool with subagent_type: "code-simplifier"
 prompt: "Review and optimize this spec file for performance and clarity:
   - Prefer build over create
   - Remove redundant test setup
@@ -152,7 +152,7 @@ prompt: "Review and optimize this spec file for performance and clarity:
 ### For Production Code (Tier 2 - /code-review)
 
 ```
-Task tool:
+Agent tool:
   subagent_type: "code-simplifier"
   prompt: |
     Review these files for performance and clarity:
@@ -193,7 +193,7 @@ Task tool:
 ### For Performance Issues (Tier 2 - /performance)
 
 ```
-Task tool:
+Agent tool:
   subagent_type: "code-simplifier"
   prompt: |
     Review these files for performance optimization:
@@ -232,7 +232,7 @@ Task tool:
 ### For Issue Fixes (Tier 3 - /factory-check)
 
 ```
-Task tool:
+Agent tool:
   subagent_type: "code-simplifier"
   prompt: |
     Apply these factory optimizations:
@@ -296,7 +296,7 @@ When adding code-simplifier to a skill:
 
 **ALWAYS run code-simplifier on new test files:**
 
-Task tool with subagent_type: "code-simplifier"
+Agent tool with subagent_type: "code-simplifier"
 prompt: "Review and optimize this spec file for performance and clarity:
   - Prefer build over create
   - Remove redundant test setup
@@ -328,7 +328,7 @@ The code-simplifier agent will:
 
 **After detecting performance issues, use code-simplifier to suggest fixes:**
 
-Task tool:
+Agent tool:
   subagent_type: "code-simplifier"
   prompt: |
     Review these files for performance optimization:
@@ -372,7 +372,7 @@ Found 12 optimization opportunities:
 Ask user: "Apply factory optimizations with code-simplifier? (y/n)"
 
 If yes:
-  Task tool:
+  Agent tool:
     subagent_type: "code-simplifier"
     prompt: |
       Apply these factory optimizations:
@@ -449,7 +449,7 @@ After integrating code-simplifier into a skill:
 
 **Fix**:
 1. Check skill's `allowed-tools` includes `code-simplifier` (it's a subagent, not a tool)
-2. Verify Task tool is available
+2. Verify Agent tool is available
 3. Use correct syntax: `subagent_type: "code-simplifier"`
 
 ### Suggestions Too Generic

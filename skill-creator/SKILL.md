@@ -128,11 +128,11 @@ Session activity:
 **Proposal**: Create `/rbac-validate` skill
 ```
 
-### Type 2: Manual Task Tool Invocations
+### Type 2: Manual Agent Tool Invocations
 **Signal**:
 ```
 Session activity:
-- Task tool with subagent_type=Explore
+- Agent tool with subagent_type=Explore
 - Prompt: "Find all X and check Y"
 - Same pattern 3+ times
 - Similar workflow each time

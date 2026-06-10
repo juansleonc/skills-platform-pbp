@@ -276,7 +276,7 @@ Each workflow was validated against:
 - ✅ **Phase 1**: All Analysis (6 skills parallel)
   - timezone, packwerk, security: Available
   - graphql, performance, multi-tenancy: Available
-  - Parallel execution via Task tool
+  - Parallel execution via Agent tool
 
 - ✅ **Phase 2**: Domain Checks (Parallel)
   - Conditional based on changes
@@ -495,6 +495,9 @@ Each workflow was validated against:
 ### Skill Dependencies ✅
 
 **All 49 skills available**:
+
+> Nota (2026-06-10): los 10 skills openspec-* fueron eliminados (duplicaban el plugin opsx:*); inventario histórico.
+
 - ✅ action-policy, adversarial-review, architect, audit-logs, code-review
 - ✅ code-smells, commit, coverage, create-pr, debug
 - ✅ docker-exec, factory-check, fix-issue, gateway-consistency, gateway-test
@@ -553,22 +556,22 @@ Each workflow was validated against:
 
 ### Phase 1A: Static Analysis
 **Expected**: timezone, packwerk, security, graphql in parallel
-**Tool**: Task tool with parallel invocations
+**Tool**: Agent tool with parallel invocations
 **Status**: VALIDATED ✅
 
 ### Phase 1B: Domain Skills
 **Expected**: memberships, pci-compliance, gateway-consistency in parallel
-**Tool**: Task tool with parallel invocations
+**Tool**: Agent tool with parallel invocations
 **Status**: VALIDATED ✅
 
 ### Phase 2.5: Code Validation
 **Expected**: sidekiq, performance, multi-tenancy in parallel
-**Tool**: Task tool with parallel invocations
+**Tool**: Agent tool with parallel invocations
 **Status**: VALIDATED ✅
 
 ### Phase 3: Quality
 **Expected**: coverage, code-review, pronto in parallel
-**Tool**: Task tool with parallel invocations
+**Tool**: Agent tool with parallel invocations
 **Status**: VALIDATED ✅
 
 ---
@@ -836,7 +839,7 @@ Each workflow was validated against:
 - ✅ CLAUDE.md Compliance: All 8 rules enforced
 - ✅ CLAUDE.local.md Compliance: All rules enforced
 - ✅ Time Estimates: 100% accuracy
-- ✅ Parallel Execution: Validated via Task tool
+- ✅ Parallel Execution: Validated via Agent tool
 - ✅ Quality Gates: All checks enforced
 - ✅ Git Safety: ABSOLUTE commit prevention
 - ✅ Documentation: Complete and cross-referenced

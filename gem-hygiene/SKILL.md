@@ -33,7 +33,7 @@ Audits gem dependencies for security vulnerabilities, unused gems, outdated vers
 
 ```bash
 # Check for known CVEs in dependencies
-docker compose exec web bundle exec bundle-audit check --update
+bin/d bundle exec bundle-audit check --update
 ```
 **Expected**: No vulnerabilities found. Any found must be addressed before release.
 
@@ -41,13 +41,13 @@ docker compose exec web bundle exec bundle-audit check --update
 
 ```bash
 # Show outdated direct dependencies (not transitive)
-docker compose exec web bundle outdated --only-explicit --parseable
+bin/d bundle outdated --only-explicit --parseable
 ```
 **Expected**: Review each. Major version bumps need careful evaluation.
 
 ```bash
 # Show just security-relevant outdated gems
-docker compose exec web bundle outdated --only-explicit | grep -i "rails\|devise\|rack\|nokogiri\|openssl\|jwt"
+bin/d bundle outdated --only-explicit | grep -i "rails\|devise\|rack\|nokogiri\|openssl\|jwt"
 ```
 **Expected**: Security gems should be on latest patch version.
 
@@ -108,7 +108,7 @@ grep -E "gem '(aasm|state_machines|workflow|statesman)'" Gemfile
 ### Step 1: Security Scan
 
 ```bash
-docker compose exec web bundle exec bundle-audit check --update
+bin/d bundle exec bundle-audit check --update
 ```
 
 For each vulnerability:
@@ -120,7 +120,7 @@ For each vulnerability:
 
 ```bash
 # Count how many gems are significantly behind
-docker compose exec web bundle outdated --only-explicit 2>/dev/null | wc -l
+bin/d bundle outdated --only-explicit 2>/dev/null | wc -l
 ```
 
 **Triage rules:**
@@ -146,7 +146,7 @@ grep "^gem " Gemfile | grep -E "', '[0-9]+\.[0-9]+\.[0-9]+'$"
 
 ```bash
 # Measure Rails boot time (slow boot often = too many gems)
-docker compose exec web time bundle exec rails runner "puts 'loaded'"
+time bin/d rails runner "puts 'loaded'"
 ```
 **Expected**: <15s boot time. If >30s, consider removing unused gems.
 

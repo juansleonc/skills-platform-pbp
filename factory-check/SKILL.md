@@ -1,7 +1,7 @@
 ---
 name: factory-check
 description: Detects suboptimal factory usage patterns that slow down tests. Analyzes specs to suggest build vs create optimizations and estimates performance impact.
-allowed-tools: [Bash, Read, Grep, Glob, Task, Edit]
+allowed-tools: [Bash, Read, Grep, Glob, Agent, Edit]
 disable-model-invocation: false
 ---
 
@@ -53,14 +53,14 @@ Automatically detects slow factory patterns in test files and suggests performan
 
 ```bash
 # Run in Docker
-docker compose exec web bundle exec ruby -e "
+bin/d ruby -e "
 require './lib/factory_checker'
 FactoryChecker.analyze('spec/models/user_spec.rb')
 "
 
 # Or scan all changed specs
 git diff develop --name-only | grep _spec.rb | while read file; do
-  docker compose exec web bundle exec ruby -e "
+  bin/d ruby -e "
     require './lib/factory_checker'
     FactoryChecker.analyze('$file')
   "
@@ -186,7 +186,7 @@ end
 **If user says YES:**
 
 ```
-Task tool:
+Agent tool:
   subagent_type: "code-simplifier"
   prompt: |
     Apply these factory optimizations:
@@ -221,13 +221,13 @@ Task tool:
 
 ```bash
 # Auto-apply safe fixes (validates this is a test file first)
-docker compose exec web bundle exec ruby -e "
+bin/d ruby -e "
 require './lib/factory_checker'
 FactoryChecker.fix('spec/models/user_spec.rb', auto_apply: true)
 "
 
 # Or manually review and apply
-docker compose exec web bundle exec ruby -e "
+bin/d ruby -e "
 require './lib/factory_checker'
 FactoryChecker.fix('spec/models/user_spec.rb', auto_apply: false)
 "
@@ -239,7 +239,7 @@ FactoryChecker.fix('spec/models/user_spec.rb', auto_apply: false)
 
 ```bash
 # Run specs and measure time
-time docker compose exec web bundle exec rspec spec/models/user_spec.rb
+time bin/d rspec spec/models/user_spec.rb
 
 # Expected: 30-50% faster after optimization
 ```
@@ -282,7 +282,7 @@ Auto-apply SKIPS these patterns (need human review):
 ## Example Run
 
 ```bash
-$ docker compose exec web bundle exec ruby -e "
+$ bin/d ruby -e "
   require './lib/factory_checker'
   FactoryChecker.analyze('spec/models/membership_spec.rb')
 "
@@ -341,11 +341,11 @@ Track performance improvements:
 
 ```bash
 # Before optimization
-$ time docker compose exec web bundle exec rspec spec/models/
+$ time bin/d rspec spec/models/
 real    2m30s
 
 # After factory-check optimization
-$ time docker compose exec web bundle exec rspec spec/models/
+$ time bin/d rspec spec/models/
 real    1m45s
 
 # Result: 45 seconds saved (30% improvement)
