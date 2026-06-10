@@ -1,0 +1,442 @@
+---
+name: kaizen
+description: Continuous improvement meta-skill. Analyzes, validates, and enhances all skills to maintain peak effectiveness. "Sharpen the saw" - systematic skill refinement and quality assurance.
+allowed-tools: [Bash, Read, Write, Edit, Grep, Glob, Task, Skill]
+disable-model-invocation: false
+---
+
+> **📋 Config Priority**: `CLAUDE.local.md` overrides `CLAUDE.md` for local settings (Docker, linting, coverage). Always check both files for current project conventions.
+
+# Kaizen: Continuous Skill Improvement
+
+## Philosophy
+
+> "改善 (Kaizen): Change for the better"
+>
+> **Skills are code. Code degrades. Therefore, skills must be continuously improved.**
+
+This skill is the meta-skill that maintains the quality and effectiveness of ALL other skills in the system. It's the "sharpening the saw" habit for Claude Code skills.
+
+## Core Principles
+
+1. **Self-Improvement**: Skills that don't evolve become obsolete
+2. **Data-Driven**: Use actual usage patterns and failures to guide improvements
+3. **Systematic**: Regular audits catch issues before they impact users
+4. **Collaborative**: Learn from each skill's kaizen sections
+5. **Measurable**: Track improvements over time
+
+## When to Use This Skill
+
+### Automatically (Trigger Conditions)
+- After 10 skill executions (any skill)
+- When a skill fails 2+ times in a row
+- After major project changes (Rails upgrade, new patterns)
+- Weekly scheduled audit (if enabled)
+
+### Manually
+```bash
+/kaizen                    # Full audit of all skills
+/kaizen skill <name>       # Audit specific skill
+/kaizen suggest            # Suggest improvements based on recent sessions
+/kaizen metrics            # Show skill usage and effectiveness metrics
+```
+
+## Kaizen Workflow
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                    KAIZEN IMPROVEMENT CYCLE                       │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                   │
+│  PHASE 1: Analyze (Understand current state)                     │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │ 1. Scan all skill files                                    │  │
+│  │ 2. Parse kaizen sections (lessons learned)                 │  │
+│  │ 3. Check for outdated patterns                             │  │
+│  │ 4. Identify inconsistencies across skills                  │  │
+│  │ 5. Review recent skill execution failures                  │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                              ↓                                    │
+│  PHASE 2: Evaluate (Assess quality)                              │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │ 1. Check documentation completeness                        │  │
+│  │ 2. Validate examples are up-to-date                        │  │
+│  │ 3. Verify tool permissions are correct                     │  │
+│  │ 4. Ensure critical rules are documented                    │  │
+│  │ 5. Check for missing patterns/best practices               │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                              ↓                                    │
+│  PHASE 3: Improve (Make it better)                               │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │ 1. Propose specific improvements                           │  │
+│  │ 2. Update outdated documentation                           │  │
+│  │ 3. Add missing examples                                    │  │
+│  │ 4. Consolidate duplicate patterns                          │  │
+│  │ 5. Cross-pollinate best practices                          │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                              ↓                                    │
+│  PHASE 4: Validate (Ensure quality)                              │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │ 1. Verify YAML frontmatter is valid                        │  │
+│  │ 2. Check all tool references exist                         │  │
+│  │ 3. Validate markdown structure                             │  │
+│  │ 4. Test examples for accuracy                              │  │
+│  │ 5. Ensure no broken references                             │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                              ↓                                    │
+│  PHASE 5: Document (Track progress)                              │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │ 1. Log improvements made                                   │  │
+│  │ 2. Update metrics                                          │  │
+│  │ 3. Create improvement report                               │  │
+│  │ 4. Add kaizen entry to improved skills                     │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                                                                   │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+## Audit Checklist
+
+### For Each Skill
+
+| Area | Check | Priority |
+|------|-------|----------|
+| **Documentation** | | |
+| - Has clear description in frontmatter | ✓ | High |
+| - Purpose is well-defined | ✓ | High |
+| - When to use section exists | ✓ | Medium |
+| - Examples are present and accurate | ✓ | Medium |
+| - Recent kaizen entries exist | ✓ | Low |
+| **Technical** | | |
+| - YAML frontmatter is valid | ✓ | Critical |
+| - All tools in allowed-tools exist | ✓ | Critical |
+| - No broken tool references in content | ✓ | High |
+| - Docker commands follow CLAUDE.local.md | ✓ | High |
+| - References to shared docs are correct | ✓ | Medium |
+| **Content Quality** | | |
+| - No outdated patterns (Time.now, etc.) | ✓ | High |
+| - Examples use correct factory patterns | ✓ | High |
+| - Consistent with CLAUDE.md rules | ✓ | High |
+| - No duplicate content across skills | ✓ | Medium |
+| - Clear dependency relationships | ✓ | Medium |
+| **Effectiveness** | | |
+| - Skill achieves its stated purpose | ✓ | High |
+| - Instructions are actionable | ✓ | High |
+| - Workflow is efficient | ✓ | Medium |
+| - No unnecessary complexity | ✓ | Medium |
+
+## Improvement Patterns
+
+### Pattern 1: Cross-Pollinate Best Practices
+
+When one skill discovers a useful pattern, propagate it:
+
+```markdown
+Example: /tdd discovers factory optimization pattern
+→ Check if /coverage, /code-review need same pattern
+→ Add to shared/factory-rules.md
+→ Reference from all relevant skills
+```
+
+### Pattern 2: Consolidate Duplicates
+
+Multiple skills with similar content should reference shared docs:
+
+```markdown
+Before:
+- /tdd has factory rules
+- /coverage has factory rules (slightly different)
+- /code-review has factory rules (different again)
+
+After:
+- shared/factory-rules.md (single source of truth)
+- All skills reference: "See [Factory Rules](../../shared/factory-rules.md)"
+```
+
+### Pattern 3: Update Examples
+
+Code examples become stale. Verify and update:
+
+```bash
+# Find potentially outdated examples
+grep -r "Time.now" .claude/skills/*/SKILL.md
+grep -r "\.to_s(:db)" .claude/skills/*/SKILL.md
+grep -r "allow_any_instance_of" .claude/skills/*/SKILL.md
+```
+
+### Pattern 4: Add Missing Integration Points
+
+Skills should reference related skills:
+
+```markdown
+Example: /membership-validate should mention:
+- Use /memberships for domain knowledge
+- Use /tdd for test implementation
+- Use /code-review for validation
+- Part of /orchestrate membership workflow
+```
+
+### Pattern 5: Improve Workflow Efficiency
+
+Look for opportunities to parallelize or skip unnecessary steps:
+
+```markdown
+Example: Can analysis skills run in parallel?
+- /timezone, /packwerk, /security are independent
+- Can use Task tool with parallel: true
+- Update /orchestrate workflow map
+```
+
+## Kaizen Metrics
+
+Track these metrics over time:
+
+```markdown
+## Skill Health Report
+
+| Skill | Last Updated | Kaizen Entries | Issues | Status |
+|-------|--------------|----------------|--------|--------|
+| architect | 2026-01-24 | 3 | 0 | ✅ Healthy |
+| tdd | 2026-01-22 | 2 | 0 | ✅ Healthy |
+| coverage | 2026-01-24 | 1 | 1 | ⚠️ Needs Review |
+| timezone | 2026-01-24 | 0 | 2 | 🔴 Action Required |
+
+### Issues Found
+- timezone: Missing examples for safe timezone handling
+- coverage: Factory rules section outdated
+```
+
+## Implementation Commands
+
+### Full Audit
+```bash
+# Scan all skills
+ls -la .claude/skills/
+
+# Check each skill
+for skill in .claude/skills/*/SKILL.md; do
+  echo "Checking: $skill"
+  # Validate YAML
+  head -10 "$skill" | grep -E "^(name|description|allowed-tools):"
+  # Check for kaizen section
+  grep -c "Kaizen:" "$skill"
+done
+```
+
+### Validate Shared References
+```bash
+# Find all references to shared docs
+grep -r "shared/" .claude/skills/*/SKILL.md
+
+# Verify files exist
+for ref in factory-rules forbidden-patterns testing-patterns critical-rules clickhouse-queries; do
+  if [ -f ".claude/shared/$ref.md" ]; then
+    echo "✅ $ref.md exists"
+  else
+    echo "❌ $ref.md missing"
+  fi
+done
+```
+
+### Check for Outdated Patterns
+```bash
+# Forbidden patterns
+grep -r "Time\.now" .claude/skills/*/SKILL.md
+grep -r "allow_any_instance_of" .claude/skills/*/SKILL.md
+grep -r "\.to_s(:db)" .claude/skills/*/SKILL.md
+
+# Docker violations
+grep -r "bundle exec" .claude/skills/*/SKILL.md | grep -v "docker\|make\|bin/d"
+```
+
+## Integration with /orchestrate
+
+Update `/orchestrate` to include periodic kaizen checks:
+
+```markdown
+### After successful workflows:
+┌─ KAIZEN CHECK ────────────────────────────────┐
+│ IF workflow completed successfully THEN       │
+│   - Log success pattern                       │
+│   - Note any improvements discovered          │
+│   - Update relevant skill kaizen sections     │
+└───────────────────────────────────────────────┘
+
+### Every 10 skill executions:
+┌─ KAIZEN AUDIT ────────────────────────────────┐
+│ Run /kaizen audit on recently used skills     │
+│   - Check for degradation                     │
+│   - Validate patterns still work              │
+│   - Suggest improvements                      │
+└───────────────────────────────────────────────┘
+```
+
+## Output Format
+
+After running kaizen, produce this report:
+
+```markdown
+# Kaizen Report - [DATE]
+
+## Summary
+- Skills Analyzed: 24
+- Issues Found: 3
+- Improvements Made: 5
+- New Patterns Documented: 2
+
+## Issues
+
+### 🔴 Critical (Must Fix)
+1. **timezone**: Broken tool reference to mcp__context7__query_timezone
+   - Location: Line 45
+   - Fix: Remove outdated MCP reference
+   - Priority: High
+
+### ⚠️ Warnings (Should Fix)
+2. **coverage**: Factory rules section duplicates shared/factory-rules.md
+   - Location: Lines 120-180
+   - Fix: Replace with reference to shared doc
+   - Priority: Medium
+
+3. **memberships**: Missing integration with /membership-validate
+   - Location: End of file
+   - Fix: Add "Related Skills" section
+   - Priority: Low
+
+## Improvements Made
+
+1. ✅ **All skills**: Updated Docker command examples to use `make` or `bin/d`
+2. ✅ **tdd, coverage, code-review**: Consolidated factory rules to shared doc
+3. ✅ **orchestrate**: Added kaizen checkpoint after Phase 3
+4. ✅ **shared/critical-rules.md**: Added new pattern for Ruby 3 date formatting
+5. ✅ **All skills**: Validated YAML frontmatter syntax
+
+## New Patterns
+
+1. **Shared Documentation Pattern**: Created template for shared docs
+   - All skills now reference shared docs instead of duplicating
+   - Easier to maintain single source of truth
+
+2. **Kaizen Section Template**: Standardized kaizen entry format
+   - Format: `<!-- Kaizen: YYYY-MM-DD --> Brief description`
+   - Makes parsing and tracking easier
+
+## Recommendations
+
+- Schedule monthly full audits
+- Add kaizen check to pre-commit workflow
+- Create shared/skill-writing-guide.md for new skills
+- Consider automated YAML validation in CI
+
+## Next Actions
+
+1. Fix critical issues (timezone tool reference)
+2. Update coverage skill to reference shared docs
+3. Add related skills sections to all skills
+4. Schedule next full audit: [DATE + 1 month]
+```
+
+## Best Practices
+
+1. **Small, Frequent Improvements**: Better than large, infrequent overhauls
+2. **Document Why**: Kaizen entries should explain reasoning
+3. **Test Changes**: Validate examples still work after updates
+4. **Cross-Reference**: Skills should help users find related skills
+5. **Measure Impact**: Track if improvements actually help
+
+## Related Skills
+
+| Skill | Relationship |
+|-------|--------------|
+| `/orchestrate` | Coordinates kaizen checks across workflows |
+| `/qa-audit` | Validates skill quality (complementary) |
+| `/code-review` | Uses similar analysis patterns |
+| `/architect` | Applies similar systematic thinking |
+
+## Common Improvements
+
+### 1. Add Shared Reference
+```markdown
+<!-- Before -->
+## Factory Rules
+[50 lines of factory documentation]
+
+<!-- After -->
+## Factory Rules
+> 📖 **See [Factory Rules](../../shared/factory-rules.md) for complete patterns.**
+
+Quick reference: [2-3 key points]
+```
+
+### 2. Update Docker Commands
+```markdown
+<!-- Before -->
+bundle exec rspec spec/models/user_spec.rb
+
+<!-- After -->
+make test TEST_PATH=spec/models/user_spec.rb
+# OR
+bin/d rspec spec/models/user_spec.rb
+```
+
+### 3. Add Integration Points
+```markdown
+## Related Skills
+- Use `/tdd` for test implementation
+- Use `/coverage` to verify 100% coverage
+- Part of `/orchestrate feature` workflow
+```
+
+### 4. Add Kaizen Entry
+```markdown
+<!-- Kaizen: 2026-01-26 -->
+- Added: Shared reference to factory-rules.md
+- Removed: 50 lines of duplicate factory documentation
+- Updated: All Docker commands to use make/bin/d
+- Added: Related Skills section
+```
+
+## Kaizen Backlog
+
+Track potential improvements for future sessions:
+
+```markdown
+## Kaizen Backlog
+
+### High Priority
+- [ ] Create shared/skill-writing-guide.md template for new skills
+- [ ] Add automated YAML validation to CI
+- [ ] Consolidate all Docker command examples
+
+### Medium Priority
+- [ ] Add skill usage metrics tracking
+- [ ] Create skill dependency graph visualization
+- [ ] Document skill execution patterns
+
+### Low Priority
+- [ ] Add skill effectiveness scoring system
+- [ ] Create skill changelog automation
+- [ ] Build skill search/discovery tool
+```
+
+---
+
+## Remember
+
+> "Continuous improvement is better than delayed perfection."
+
+Skills are living documentation. They must evolve with the project, patterns, and tools. Kaizen ensures they stay sharp, relevant, and effective.
+
+**Don't wait for perfection. Improve incrementally. Document progress. Share learnings.**
+
+---
+
+## Kaizen: Meta-Kaizen
+
+> "Even the kaizen skill must practice kaizen."
+
+<!-- Kaizen: 2026-01-26 -->
+- Created: Initial kaizen skill implementation
+- Purpose: Systematic skill improvement and quality assurance
+- Inspired by: Existing kaizen sections in /orchestrate and /tdd
+- Next: Integrate with /orchestrate for automatic periodic checks
