@@ -1,6 +1,6 @@
 ---
 name: graphql
-description: Validates GraphQL API changes for backward compatibility, deferred queries, and mobile app safety. Prevents breaking changes to the 108 mutations used by mobile apps.
+description: Validates GraphQL API changes for backward compatibility, deferred queries, and mobile app safety. Prevents breaking changes to the mutations used by mobile apps (run `find app/graphql/mutations packs/*/app/graphql/mutations -name '*.rb' 2>/dev/null | wc -l` for current count).
 allowed-tools: [Bash, Read, Grep, Glob, Edit, mcp__context7__resolve-library-id, mcp__context7__query-docs]
 disable-model-invocation: false
 ---
@@ -10,15 +10,15 @@ disable-model-invocation: false
 ## When to Use This Skill
 
 Run this skill when:
-- **Modifying GraphQL mutations** (108 mutations serving mobile apps)
-- **Adding new GraphQL fields** to existing types (23 types in production)
+- **Modifying GraphQL mutations** (run `find app/graphql/mutations packs/*/app/graphql/mutations -name '*.rb' 2>/dev/null | wc -l` for current count — includes pack mutations under `packs/*/app/graphql/**`)
+- **Adding new GraphQL fields** to existing types
 - **Changing GraphQL resolvers** that mobile apps depend on
 - **Before production deployment** of API changes (prevent mobile app breakage)
 - **Reviewing PRs** that touch `app/graphql/` directory
 
 # GraphQL API Validation Skill
 
-Validates GraphQL changes to prevent breaking mobile apps. The platform has **108 mutations** and **23 types** that mobile apps depend on.
+Validates GraphQL changes to prevent breaking mobile apps. The platform has mutations in both `app/graphql/mutations/` and pack-level `packs/*/app/graphql/mutations/` that mobile apps depend on (run `find app/graphql/mutations packs/*/app/graphql/mutations -name '*.rb' 2>/dev/null | wc -l` for current count).
 
 ## CRITICAL RULES
 
@@ -40,7 +40,7 @@ git diff develop -- app/graphql/ | grep "^-.*field :"
 
 ```bash
 # 2. Find mutations without input validation - HIGH RISK
-grep -rn "def resolve(" app/graphql/mutations/ --include="*.rb" | xargs grep -L "validate\|errors.add"
+grep -rl "def resolve(" app/graphql/mutations/ packs/*/app/graphql/mutations/ --include="*.rb" 2>/dev/null | xargs grep -L "validate\|errors.add"
 ```
 **Expected**: 0 matches (all mutations should validate inputs)
 
@@ -58,7 +58,7 @@ grep -rn "resolver:" app/graphql/ --include="*.rb" | grep -v "Defer\|extension"
 
 ```bash
 # 5. Find auth logic in resolvers - SECURITY VIOLATION
-grep -rn "authenticate\|authorize\|raise.*Unauthorized" app/graphql/mutations/ app/graphql/types/ --include="*.rb"
+grep -rn "authenticate\|authorize\|raise.*Unauthorized" app/graphql/mutations/ app/graphql/types/ packs/*/app/graphql/mutations/ packs/*/app/graphql/types/ --include="*.rb" 2>/dev/null
 ```
 **Expected**: 0 matches (auth belongs in GraphqlController, not resolvers)
 
@@ -67,30 +67,30 @@ grep -rn "authenticate\|authorize\|raise.*Unauthorized" app/graphql/mutations/ a
 ### Step 1: Identify GraphQL Changes
 
 ```bash
-# Find GraphQL changes in branch
-git diff develop --name-only -- app/graphql/
+# Find GraphQL changes in branch (includes app/ and all packs)
+git diff develop --name-only -- app/graphql/ 'packs/*/app/graphql/'
 
 # Show detailed changes
-git diff develop -- app/graphql/
+git diff develop -- app/graphql/ 'packs/*/app/graphql/'
 ```
 
 ### Step 2: Check for Breaking Changes
 
 ```bash
 # Find removed fields (CRITICAL)
-git diff develop -- app/graphql/ | grep "^-.*field :"
+git diff develop -- app/graphql/ 'packs/*/app/graphql/' | grep "^-.*field :"
 ```
 **Expected**: 0 matches (field removals are **BREAKING** - mobile apps crash)
 
 ```bash
 # Find type changes
-git diff develop -- app/graphql/types/ | grep -E "^[-+].*field :"
+git diff develop -- app/graphql/types/ 'packs/*/app/graphql/types/' | grep -E "^[-+].*field :"
 ```
 **Expected**: Only additions (`+`) - no removals (`-`) or type changes
 
 ```bash
 # Find removed mutations
-git diff develop -- app/graphql/mutations/ | grep "^-.*class "
+git diff develop -- app/graphql/mutations/ 'packs/*/app/graphql/mutations/' | grep "^-.*class "
 ```
 **Expected**: 0 matches (mutation removals are **BREAKING** - mobile apps fail)
 
@@ -117,28 +117,25 @@ field :old_field, String, deprecation_reason: "Use new_field instead"
 + field :new_mutation, mutation: NewMutation
 ```
 
-### Step 3.5: Real PBP Breaking Change Examples
+### Step 3.5: Illustrative Breaking Change Examples (NOT from this codebase — do not cite as evidence)
 
-Real violations found in production codebase:
+These examples demonstrate common GraphQL breaking change patterns. They are NOT sourced from real files or line numbers in this codebase. `app/graphql/types/user_type.rb`, `reservation_type.rb`, and `membership_type.rb` do not exist at HEAD — the `app/graphql/types/` directory contains only base/scalar types and a few root types.
 
-**VIOLATION 1: Field removal breaking mobile**
+**EXAMPLE 1: Field removal breaking mobile**
 ```ruby
-# ❌ BAD - Found in app/graphql/types/user_type.rb
-# Removed field without deprecation
+# ❌ BAD - Removed field without deprecation
 - field :legacy_id, Integer, null: true
 
-# Impact: Mobile app v2.3+ crashes on user profile page
-# Why: iOS app expects legacy_id for backward compatibility check
+# Impact: Mobile app crashes on any page that accessed this field
 
 # ✅ GOOD - Deprecate first, remove later
 field :legacy_id, Integer, null: true,
   deprecation_reason: "Use :id instead. Removal planned for 2026-03-01"
 ```
 
-**VIOLATION 2: Type change breaking queries**
+**EXAMPLE 2: Type change breaking queries**
 ```ruby
-# ❌ BAD - Found in app/graphql/types/reservation_type.rb
-# Changed String → Integer without versioning
+# ❌ BAD - Changed String → Integer without versioning
 - field :court_number, String, null: false
 + field :court_number, Integer, null: false
 
@@ -151,29 +148,25 @@ field :court_number, String, null: false,
 field :court_number_int, Integer, null: true
 ```
 
-**VIOLATION 3: Mutation removed without deprecation**
+**EXAMPLE 3: Mutation removed without deprecation**
 ```ruby
-# ❌ BAD - Found in app/graphql/mutations/
-# Removed mutation used by mobile app
+# ❌ BAD - Removed mutation used by mobile app
 - field :update_legacy_profile, mutation: UpdateLegacyProfile
 
-# Impact: Mobile app v2.x shows "Unknown mutation" error
-# Why: Older app versions still call this mutation
+# Impact: Mobile app shows "Unknown mutation" error for older versions
 
 # ✅ GOOD - Deprecate with timeline
 field :update_legacy_profile, mutation: UpdateLegacyProfile,
   deprecation_reason: "Use updateProfile instead. Removal: 2026-04-01"
 ```
 
-**VIOLATION 4: Making field non-nullable**
+**EXAMPLE 4: Making a nullable field non-nullable**
 ```ruby
-# ❌ BAD - Found in app/graphql/types/membership_type.rb
-# Changed nullable to non-nullable
+# ❌ BAD - Changed nullable to non-nullable
 - field :expires_at, GraphQL::Types::ISO8601DateTime, null: true
 + field :expires_at, GraphQL::Types::ISO8601DateTime, null: false
 
-# Impact: Existing memberships with null expires_at crash mobile app
-# Why: 1,234 unlimited memberships have null expires_at in production
+# Impact: Memberships with null expires_at crash the mobile app response
 
 # ✅ GOOD - Keep nullable, handle in resolver
 field :expires_at, GraphQL::Types::ISO8601DateTime, null: true
@@ -183,17 +176,13 @@ def expires_at
 end
 ```
 
-**VIOLATION 5: Resolver without multi-tenancy**
+**EXAMPLE 5: Resolver without multi-tenancy**
 ```ruby
-# ❌ BAD - Found in app/graphql/mutations/create_reservation.rb
+# ❌ BAD - Missing facility scope (data leakage)
 def resolve(input:)
-  # Missing facility_id scope - data leakage risk!
   court = Court.find(input[:court_id])
   Reservation.create!(court: court, ...)
 end
-
-# Impact: User could book courts from other facilities
-# Risk: CRITICAL multi-tenancy violation
 
 # ✅ GOOD - Scoped to current_facility
 def resolve(input:)
@@ -275,20 +264,21 @@ field :heavy_data, resolver: HeavyResolver
 ```
 
 ```bash
-# Find potentially heavy resolvers without defer
-grep -rn "resolver:" app/graphql/ --include="*.rb" | grep -v "Defer"
+# Find potentially heavy resolvers without defer (app + packs)
+grep -rn "resolver:" app/graphql/ packs/*/app/graphql/ --include="*.rb" 2>/dev/null | grep -v "Defer"
 ```
 **Expected**: Review each match - heavy operations (reports, aggregations, includes) need `extension GraphQL::Pro::Defer`
 
 ### Step 5: Check Auth Patterns
 
 ```ruby
-# ✅ GOOD - Auth in GraphqlController
+# ✅ GOOD - Auth in GraphqlController (real guards used by this app)
 class GraphqlController < ApplicationController
-  before_action :authenticate_user!
+  before_action :verify_header_temporal_token  # validates JWT / temporal token from mobile headers
+  before_action :verify_blocked_account        # rejects suspended/blocked accounts
 
   def execute
-    context = { current_user: current_user, current_facility: current_facility }
+    context = { current_user: current_user_graphql, current_facility: @current_facility }
     # ...
   end
 end
@@ -458,15 +448,10 @@ This skill works with:
    - Clear success criteria (0 matches = safe, >0 matches = breaking change)
    - Users can instantly validate if API changes are safe
 
-4. **Added real PBP breaking change examples** (ROI: 1.8)
-   - 5 concrete violations from actual codebase:
-     * Field removal breaking mobile v2.3+ (user_type.rb)
-     * Type change String→Integer (reservation_type.rb)
-     * Mutation removed without deprecation
-     * Making field non-nullable (membership_type.rb - 1,234 affected records)
-     * Resolver without multi-tenancy (create_reservation.rb)
-   - Real models: User, Reservation, Membership, Court
-   - Production impact documented (mobile app crashes, data leakage)
+4. **Added breaking change examples** (ROI: 1.8)
+   - 5 illustrative examples of common patterns
+   - Teaching examples only — `user_type.rb`, `reservation_type.rb`, `membership_type.rb` do not exist at HEAD in `app/graphql/types/`
+   - See "Illustrative examples" section for correct labeling
 
 5. **Added Related Skills section** (ROI: 1.0)
    - Links to multi-tenancy, security, performance, code-review, tdd
@@ -481,3 +466,9 @@ This skill works with:
 **Lines changed:** 293 → ~405 (+112 lines, +38% documentation)
 **Time invested:** 22 minutes
 **ROI:** 1.9 average across all improvements
+
+<!-- Kaizen: 2026-06-10 — Fabrication purge / honest baselines (Fable audit Tier 2') -->
+- Relabeled 5 fabricated "Real PBP Breaking Change Examples": `app/graphql/types/user_type.rb`, `reservation_type.rb`, and `membership_type.rb` do not exist at HEAD (`app/graphql/types/` only contains base/scalar types). Section relabeled "Illustrative examples (NOT from this codebase — do not cite as evidence)". Examples retained because they are good teaching material for breaking-change patterns.
+- Fixed Quick Validation command #2 broken pipeline: `grep -rn "def resolve(" ... | xargs grep -L` is invalid because grep -rn output is `file:line:content` not filenames — changed first stage to `grep -rl` so xargs receives plain filenames.
+- Hardcoded "108 mutations" and "23 types" replaced with dynamic command `find app/graphql/mutations -name '*.rb' | wc -l` (verified count: 119 as of 2026-06-10). Also updated description frontmatter and "When to Use" section.
+- Lesson: file:line citations must verify against HEAD or be labeled illustrative; hardcoded counts become stale — prefer dynamic commands.
