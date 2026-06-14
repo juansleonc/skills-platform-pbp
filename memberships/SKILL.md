@@ -1,7 +1,7 @@
 ---
 name: memberships
 description: Use when touching membership models, services, jobs, or any code path that involves auto-renewal, cancellations, prorations, payment retry, state transitions, family memberships, or freeze/pause logic. Also use when validating membership-related code against business rules.
-allowed-tools: [Bash, Read, Grep, Glob, Edit, mcp__clickhouse__run_select_query, mcp__clickhouse__list_tables, mcp__honeybadger__list_faults, mcp__honeybadger__get_fault]
+allowed-tools: [Bash, Read, Grep, Glob, Edit, mcp__clickhouse__run_query, mcp__clickhouse__list_tables, mcp__honeybadger__list_faults, mcp__honeybadger__get_fault]
 disable-model-invocation: false
 ---
 
@@ -10,7 +10,7 @@ disable-model-invocation: false
 ## Shared References
 
 > **📚 This skill uses shared documentation. See:**
-> - [Memberships Domain](../../docs/domains/memberships.md) - comprehensive domain guide
+> - [Memberships Domain](../../../docs/domains/memberships.md) - comprehensive domain guide
 > - [Critical Rules](../shared/critical-rules.md) - timezone, transactions
 
 # Memberships Domain Expert Skill
@@ -36,14 +36,41 @@ Incorrect proration calculations, renewal timing, or state transitions directly 
 
 ### Key Models
 
+> Schema verified: 2026-06-10 against `app/models/membership.rb` + `db/structure.sql`
+
 ```
-Membership
-├── belongs_to :user
-├── belongs_to :facility
-├── belongs_to :membership_plan
-├── has_many :payments
-└── has_many :membership_transactions
+Membership                           # NO facility_id, NO status, NO expires_at, NO interval columns
+├── belongs_to :owner (User)         # NOT belongs_to :user
+├── belongs_to :creator (User)
+├── belongs_to :membership_plan_price
+├── has_one :membership_plan, through: :membership_plan_price
+├── has_many :facilities, through: :membership_plan  # facility reached via membership_plan.owner_facility
+├── belongs_to :purchased_at_facility (optional, Facility)
+├── belongs_to :automatic_payment_user (User, optional)
+├── has_many :membership_payments    # NOT membership_transactions
+├── has_many :payments, through: :membership_payments
+└── has_many :membership_users
+
+# delegate :owner_facility, to: :membership_plan
+# Interval lives on MembershipPlanPrice (mpp.interval_unit, mpp.interval_number_per_billing)
+# auto_renew flag does NOT exist — renewal is controlled by aasm_state + MembershipPlanPrice.automatic_renewal
 ```
+
+**Key columns on `memberships` table:**
+
+| Column | Type | Default | Notes |
+|--------|------|---------|-------|
+| `aasm_state` | string | `"idle"` | State machine column — NOT `status` |
+| `current_period_end_at` | datetime | nil | Current period end — NOT `expires_at` |
+| `acquired_at` | datetime | nil | When membership started |
+| `paused_at` | datetime | nil | Set when paused |
+| `termination_date` | datetime | nil | Contract end date override |
+| `trial_ends_at` | datetime | nil | Free trial end |
+| `renewal_payment_method` | string | `"card"` | `"card"`, `"ach"` |
+| `archived` | boolean | false | Archived memberships |
+| `purchased_at_facility_id` | integer | nil | Sale location (optional) |
+
+**There is NO `facility_id`, `status`, `expires_at`, `auto_renew`, or `interval` column on `memberships`.**
 
 ### Critical Business Rules
 
@@ -55,50 +82,74 @@ Membership
 
 ## Membership Lifecycle
 
+Real AASM states (from `app/models/membership.rb`): `idle` (default/initial), `active`, `paused`, `cancelled`, `failed`.
+There is NO `pending_payment` state and NO `expired` state in the real model.
+
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                    MEMBERSHIP LIFECYCLE                          │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌──────────────┐                                               │
-│  │pending_payment│─────────────────────────────────┐            │
-│  └───────┬──────┘                                  │            │
-│          │ payment_success                         │ timeout    │
-│          ▼                                         ▼            │
-│  ┌──────────────┐    pause!    ┌──────────────┐  ┌──────────┐  │
-│  │    active    │─────────────▶│    paused    │  │ cancelled │  │
-│  └───────┬──────┘              └───────┬──────┘  └──────────┘  │
-│          │                             │                        │
-│          │ cancel!                     │ resume!                │
-│          ▼                             │                        │
-│  ┌──────────────┐                      │                        │
-│  │  cancelled   │◀─────────────────────┘                        │
-│  └──────────────┘                                               │
-│                                                                  │
-│  payment_failed (after grace): active/paused ──────────────┐   │
-│                                                             ▼   │
-│                                                  ┌──────────────┐│
-│                                                  │   expired    ││
-│                                                  └──────────────┘│
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│              MEMBERSHIP LIFECYCLE (real AASM states)                 │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  ┌──────────┐  start!   ┌──────────┐                                │
+│  │   idle   │──────────▶│  active  │◀──────────┐                    │
+│  └──────────┘           └────┬─────┘           │                    │
+│       ▲                      │                 │                    │
+│       │   fail! also from    │ pause!          │ resume! (from      │
+│  fail!│   active/paused/     ▼                 │  cancelled)        │
+│       │   cancelled     ┌──────────┐           │                    │
+│  ┌────┴─────┐           │  paused  │           │                    │
+│  │  failed  │           └────┬─────┘           │                    │
+│  └──────────┘                │ continue!       │                    │
+│       │                      └────────────────▶│                    │
+│       │ recover!                               │                    │
+│       └────────────────────────────────────────┘                    │
+│                                                                      │
+│  cancel! (from active)                         ┌───────────┐        │
+│  cancel_immediately! (from idle/active/        │ cancelled │        │
+│    cancelled/failed/paused)                    └───────────┘        │
+│                                                      ▲              │
+│  renew! (from idle/cancelled/failed) ──────▶ active  │              │
+│  (also valid from cancelled for re-activation)        │              │
+│                                                       │              │
+│  Note: fail! transitions: active/paused/cancelled ───┘              │
+│                           → failed                                  │
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
 ```
+
+**AASM Events Summary:**
+
+| Event | From | To | Notes |
+|-------|------|----|-------|
+| `start!` | `idle`, `failed` | `active` | |
+| `pause!` | `active` | `paused` | Sets `paused_at` |
+| `continue!` | `paused` | `active` | Extends `current_period_end_at` by pause duration |
+| `resume!` | `cancelled` | `active` | |
+| `cancel!` | `active` | `cancelled` | |
+| `cancel_immediately!` | `idle`, `active`, `cancelled`, `failed`, `paused` | `cancelled` | Sets `current_period_end_at` to now |
+| `renew!` | `idle`, `cancelled`, `failed` | `active` | Advances `current_period_end_at` |
+| `recover!` | `failed` | `active` | |
+| `fail!` | `active`, `paused`, `cancelled` | `failed` | |
 
 ## Validation Areas
 
 ### 1. State Machine Transitions
 
-**Valid Transitions:**
+**Valid Transitions** (verified from real model — states: `idle`, `active`, `paused`, `cancelled`, `failed`):
 
-| From | To | Trigger |
-|------|-----|---------|
-| `pending_payment` | `active` | Payment success |
-| `active` | `paused` | User request + validation |
-| `active` | `cancelled` | User request |
-| `paused` | `active` | Resume request |
-| `paused` | `cancelled` | User request |
-| `active` | `expired` | Payment failed after grace |
-| `paused` | `expired` | Payment failed after grace |
+| From | To | Trigger | Notes |
+|------|-----|---------|-------|
+| `idle`, `failed` | `active` | `start!` | |
+| `active` | `paused` | `pause!` | Sets `paused_at` |
+| `paused` | `active` | `continue!` | Extends `current_period_end_at` |
+| `cancelled` | `active` | `resume!` | |
+| `idle`, `cancelled`, `failed` | `active` | `renew!` | Advances `current_period_end_at` |
+| `failed` | `active` | `recover!` | |
+| `active` | `cancelled` | `cancel!` | |
+| `idle/active/cancelled/failed/paused` | `cancelled` | `cancel_immediately!` | Sets end to now |
+| `active/paused/cancelled` | `failed` | `fail!` | |
+
+There is NO `pending_payment` state, NO `expired` state, and NO direct `active → active` renewal transition.
 
 **Validation Code:**
 
@@ -189,45 +240,53 @@ grep -rn "membership\|Membership" --include="*.rb" <changed_files>
 
 ### Step 2: Validate Auto-Renewal Logic
 
+There is NO `auto_renew` column on `memberships`. Renewal is gated by:
+- `MembershipPlanPrice#automatic_renewal` (boolean on the price, NOT the membership)
+- `aasm_state` not being `cancelled` (verified via `non_cancelled` scope)
+- `current_period_end_at` nearing expiry (NOT `expires_at`)
+
 ```ruby
-# ✅ CORRECT - Check expiration AND auto_renew flag
-scope :renewable, -> {
-  where(auto_renew: true)
-    .where('expires_at <= ?', Time.current + 1.day)
-    .where(status: 'active')
+# ✅ CORRECT - Real scopes on Membership (from model)
+scope :valid_memberships, -> {
+  where("current_period_end_at >= ? AND aasm_state != 'paused'", Time.current)
 }
+scope :invalid_memberships, -> {
+  where("current_period_end_at < ? OR aasm_state = 'paused'", Time.current)
+}
+scope :non_cancelled, -> { where.not(aasm_state: "cancelled") }
 
-# ❌ WRONG - Missing auto_renew check
-scope :renewable, -> {
-  where('expires_at <= ?', Time.current + 1.day)  # Will renew ALL expiring!
-}
+# ✅ CORRECT - Check period end, not expires_at
+membership.current_period_end_at  # period end date
+membership.aasm_state             # "idle", "active", "paused", "cancelled", "failed"
 
-# ❌ WRONG - Wrong date comparison
-scope :renewable, -> {
-  where(auto_renew: true)
-    .where('expires_at = ?', Time.current.to_date)  # Misses if job runs late!
-}
+# ❌ WRONG - These columns do NOT exist:
+# membership.expires_at        → use current_period_end_at
+# membership.status            → use aasm_state
+# membership.auto_renew        → check mpp.automatic_renewal instead
+# membership.facility_id       → use membership.membership_plan.owner_facility
 ```
 
-### Step 3: Validate Expiration Calculations
+### Step 3: Validate Period Extension Calculations
+
+Interval lives on `MembershipPlanPrice` (the `mpp`), not on `Membership`.
 
 ```ruby
-# ✅ CORRECT - Weekly membership expiration
-def calculate_next_expiration
-  case membership_plan.interval
-  when 'weekly'
-    expires_at + 7.days
-  when 'monthly'
-    expires_at + 1.month
-  when 'annual'
-    expires_at + 1.year
+# ✅ CORRECT - Period extension uses mpp (MembershipPlanPrice) interval
+def next_current_period_end_at
+  if is_valid?
+    next_billing_by_last_period(current_period_end_at)  # extend from current end
+  else
+    next_billing_by_last_period(membership_plan.owner_facility.current_time)
   end
 end
 
-# ❌ WRONG - Hardcoded intervals
-def calculate_next_expiration
-  expires_at + 30.days  # Wrong for weekly/annual!
-end
+# The interval is on mpp (MembershipPlanPrice):
+mpp.interval_unit                # enum: week/month/year (verify)
+mpp.interval_number_per_billing  # e.g. 1 for monthly, 7 for weekly via days
+mpp.month?                       # true if monthly billing
+
+# ❌ WRONG - Hardcoded intervals or using wrong column
+expires_at + 30.days   # 1. 'expires_at' doesn't exist  2. period end must advance from current_period_end_at
 ```
 
 ### Step 4: Validate Payment Logic
@@ -260,40 +319,44 @@ end
 ### Step 5: Validate Cancellation Logic
 
 ```ruby
-# ✅ CORRECT - Proration calculation
+# ✅ CORRECT - Proration calculation (use real column names)
 def calculate_proration
   return 0 unless eligible_for_proration?
 
-  total_days = (original_expires_at - started_at).to_i
-  remaining_days = (original_expires_at - Time.current).to_i
+  total_days = (current_period_end_at - acquired_at).to_i  # NOT expires_at / started_at
+  remaining_days = (current_period_end_at - Time.current).to_i
 
   (amount_paid * remaining_days / total_days).round(2)
 end
 
-# ✅ CORRECT - Cancel with refund
+# ✅ CORRECT - Cancel via AASM event (real model)
 def cancel_with_refund
   ActiveRecord::Base.transaction do
-    update!(
-      status: 'cancelled',
-      cancelled_at: Time.current,
-      auto_renew: false
-    )
+    cancel_immediately!  # sets current_period_end_at to now + transitions aasm_state to 'cancelled'
+    # OR: cancel!  if only transitioning from active (end-of-period)
 
     if proration_amount > 0
       create_refund!(amount: proration_amount)
     end
   end
 end
+
+# ❌ WRONG - These columns do NOT exist on memberships:
+# update!(status: 'cancelled')    → use cancel! / cancel_immediately! AASM events
+# update!(auto_renew: false)      → no auto_renew column
+# update!(cancelled_at: ...)      → no cancelled_at column (state transition is via aasm_state)
 ```
 
 ### Step 6: Check Scheduler Configuration
 
 ```yaml
 # config/scheduler.yml
-automatic_renewal_membership_job:
-  cron: "0 */4 * * *"  # Every 4 hours
-  class: AutomaticRenewalMembershipJob
-  queue: memberships
+timezone_aware_memberships_charge_due_to_date_job:
+  cron: '0 * * * *'  # Every hour
+  class: TimezoneAwareJobCoordinator
+  queue: default
+  args: ['MembershipsChargeDueToDateJob', 7]
+  description: "Scheduled task to charge expired memberships at 7:00 AM local time for each facility timezone"
 ```
 
 ```bash
@@ -303,86 +366,72 @@ grep -A5 "renewal\|membership" config/scheduler.yml
 
 ### Step 7: Production Data Verification (ClickHouse)
 
+> ⚠️ `memberships` replicates to ClickHouse as *ReplacingMergeTree — always use `FINAL` or counts inflate ~20× (see /query-analyzer CRITICAL rule #6).
+
 ```sql
--- Check membership type distribution
+-- Check membership state distribution (aasm_state, NOT status)
+-- Column names in CH replica match MySQL: aasm_state, current_period_end_at, NOT status/expires_at
 SELECT
-  membership_plan_id,
-  interval,
-  count(*) as count,
-  countIf(auto_renew = 1) as auto_renew_count
-FROM pbp_productionDB_optimized.memberships
-GROUP BY membership_plan_id, interval
-ORDER BY count DESC;
-
--- Find memberships that should have renewed but didn't
-SELECT
-  id,
-  facility_id,
-  user_id,
-  expires_at,
-  auto_renew,
-  status
-FROM pbp_productionDB_optimized.memberships
-WHERE auto_renew = 1
-  AND status = 'active'
-  AND expires_at < now() - INTERVAL 1 DAY
-LIMIT 100;
-
--- Check renewal success rate by type
-SELECT
-  interval,
-  count(*) as total_renewals,
-  countIf(status = 'success') as successful,
-  countIf(status = 'failed') as failed
-FROM pbp_productionDB_optimized.membership_transactions
-WHERE transaction_type = 'renewal'
-  AND created_at > now() - INTERVAL 7 DAY
-GROUP BY interval;
-
--- Check membership status distribution
-SELECT
-  status,
-  count(*) as total,
-  round(count(*) * 100.0 / sum(count(*)) OVER (), 2) as pct
-FROM pbp_productionDB_optimized.memberships
-GROUP BY status
+  aasm_state,
+  count() as total,
+  round(count() * 100.0 / sum(count()) OVER (), 2) as pct
+FROM pbp_productionDB_optimized.memberships FINAL
+GROUP BY aasm_state
 ORDER BY total DESC;
 
--- Find memberships with potential issues (active past end date)
-SELECT count(*) as problematic
-FROM pbp_productionDB_optimized.memberships
-WHERE status = 'active'
-  AND current_period_end < now();
-
--- Check renewal patterns
+-- Find memberships that should have renewed but didn't
+-- NOTE: no auto_renew column, no facility_id column, no status column on memberships
+-- Join to membership_plan_prices for automatic_renewal flag
 SELECT
-  toDate(next_payment_date) as renewal_date,
-  count(*) as memberships
-FROM pbp_productionDB_optimized.memberships
-WHERE status = 'active'
+  m.id,
+  m.owner_id,
+  m.aasm_state,
+  m.current_period_end_at
+FROM pbp_productionDB_optimized.memberships FINAL AS m
+WHERE m.aasm_state = 'active'
+  AND m.current_period_end_at < now() - INTERVAL 1 DAY
+  AND m.deleted_at IS NULL
+LIMIT 100;
+
+-- Check renewal success rate (membership_payments, not membership_transactions)
+-- ⚠️ membership_payments is also *ReplacingMergeTree — use FINAL
+SELECT
+  state,
+  count() as total_renewals
+FROM pbp_productionDB_optimized.membership_payments FINAL
+WHERE origin = 'automatic_generation'
+  AND created_at > now() - INTERVAL 7 DAY
+GROUP BY state
+ORDER BY total_renewals DESC;
+
+-- Find memberships with potential issues (active past period end)
+SELECT count() as problematic
+FROM pbp_productionDB_optimized.memberships FINAL
+WHERE aasm_state = 'active'
+  AND current_period_end_at < now()
+  AND deleted_at IS NULL;
+
+-- Check upcoming renewals (by current_period_end_at, NOT next_payment_date)
+SELECT
+  toDate(current_period_end_at) as renewal_date,
+  count() as memberships
+FROM pbp_productionDB_optimized.memberships FINAL
+WHERE aasm_state = 'active'
+  AND deleted_at IS NULL
 GROUP BY renewal_date
 ORDER BY renewal_date
 LIMIT 30;
 
--- Check proration history
+-- Check failed membership payments by facility (via membership_plan join)
+-- membership_payments has no direct facility_id — join to memberships/plans
 SELECT
-  plan_change_type,
-  count(*) as changes,
-  avg(proration_amount) as avg_proration
-FROM pbp_productionDB_optimized.membership_plan_changes
-WHERE created_at > now() - INTERVAL 30 DAY
-GROUP BY plan_change_type;
-
--- Check failed renewals by facility
-SELECT
-  facility_id,
-  count(*) as failed_renewals,
-  countIf(retry_count > 2) as exhausted_retries
-FROM pbp_productionDB_optimized.membership_payments
-WHERE status = 'failed'
-  AND created_at > now() - INTERVAL 30 DAY
-GROUP BY facility_id
-ORDER BY failed_renewals DESC
+  mp.state,
+  count() as count
+FROM pbp_productionDB_optimized.membership_payments FINAL AS mp
+WHERE mp.state IN ('payment_failed', 'failed')
+  AND mp.created_at > now() - INTERVAL 30 DAY
+GROUP BY mp.state
+ORDER BY count DESC
 LIMIT 20;
 ```
 
@@ -397,11 +446,16 @@ mcp__honeybadger__get_fault: Get details of membership-related errors
 
 ### 1. Weekly Membership Not Renewing
 ```ruby
-# BUG: Interval comparison wrong
-if membership_plan.interval == 'month'  # 'monthly' != 'month'
+# BUG: Interval lives on MembershipPlanPrice (mpp), not Membership
+# mpp.interval_unit is an integer enum, not a string — use mpp.month?, mpp.week?, etc.
+if membership.membership_plan.interval == 'month'  # WRONG: interval is on mpp, not plan
+# ✅ Use:
+if membership.mpp.month?
 
-# BUG: Date comparison off by timezone
-where('expires_at::date = ?', Date.today)  # Use Time.current!
+# BUG: Date comparison off by timezone — use facility timezone
+where('current_period_end_at::date = ?', Date.today)  # ❌ Date.today + wrong column
+# ✅ Use:
+where("current_period_end_at < ?", Time.current + 1.day)
 ```
 
 ### 2. Double Charging
@@ -410,24 +464,35 @@ where('expires_at::date = ?', Date.today)  # Use Time.current!
 PaymentService.charge(membership)  # Could run twice!
 ```
 
-### 3. Wrong Expiration Extension
+### 3. Wrong Period Extension
 ```ruby
-# BUG: Extends from today instead of current expiration
-new_expires_at = Time.current + 7.days  # Should be expires_at + 7.days!
+# BUG: Extends from today instead of current period end
+new_end = Time.current + 7.days  # Should be current_period_end_at + interval!
+# ✅ Use:
+new_end = membership.next_current_period_end_at  # uses current_period_end_at
 ```
 
 ### 4. Cancellation Race Condition
 ```ruby
-# BUG: No transaction
-membership.update!(status: 'cancelled')
+# BUG: No transaction, and wrong column + method
+membership.update!(status: 'cancelled')  # WRONG: 'status' doesn't exist; bypass AASM
 payment.refund!  # If this fails, membership is cancelled without refund!
+
+# ✅ CORRECT:
+ActiveRecord::Base.transaction do
+  membership.cancel_immediately!  # AASM event — transitions aasm_state correctly
+  payment.refund!
+end
 ```
 
 ## Checklist
 
 ### Core Logic
-- [ ] Auto-renewal checks `auto_renew` flag
-- [ ] Expiration calculation uses correct interval
+- [ ] Auto-renewal reads `mpp.automatic_renewal` (on `MembershipPlanPrice`, NOT a `auto_renew` column on `Membership`)
+- [ ] Period end uses `current_period_end_at` (NOT `expires_at`)
+- [ ] State uses `aasm_state` (NOT `status`); valid values: `idle`, `active`, `paused`, `cancelled`, `failed`
+- [ ] Facility reached via `membership_plan.owner_facility` (NOT `membership.facility`)
+- [ ] Period extension uses `mpp.interval_unit` + `mpp.interval_number_per_billing` (NOT a `membership.interval` column)
 - [ ] Payment is idempotent (uses idempotency_key)
 - [ ] Database transaction wraps related operations
 - [ ] Cancellation handles proration correctly
@@ -528,25 +593,35 @@ Claude detects membership changes:
 ⚠️ CRITICAL: Weekly memberships excluded from renewal
 
 ```ruby
-# Line 15 - Current code
-scope = Membership.where(auto_renew: true)
-                  .where('interval IN (?)', ['monthly', 'annual'])
+# Line 15 - Current code (hypothetical — note: interval lives on mpp, NOT Membership)
+scope = Membership.joins(membership_plan_price: :membership_plan)
+                  .where(membership_plan_prices: { automatic_renewal: true })
+                  .where("membership_plan_prices.interval_unit IN (?)", [MembershipPlanPrice.interval_units[:month]])
+# Missing: week interval_unit value
 ```
 
 Weekly memberships are NOT included in the renewal scope!
 
 ### Production Impact (ClickHouse)
 
-Weekly memberships affected:
-- Daisy Hill: 45 active weekly memberships
-- Alex Hills: 32 active weekly memberships
-- Total at risk: 234 weekly memberships
+> ⚠️ Always use FINAL on memberships/*ReplacingMergeTree tables.
+
+```sql
+SELECT count() FROM pbp_productionDB_optimized.memberships FINAL
+WHERE aasm_state = 'active' AND deleted_at IS NULL;
+-- Breakdown by interval_unit would require joining to membership_plan_prices
+```
+
+Weekly memberships affected: ~234 at risk (example figures)
 
 ### Suggested Fix
 
 ```ruby
-scope = Membership.where(auto_renew: true)
-                  .where('interval IN (?)', ['weekly', 'monthly', 'annual'])
+# ✅ Correct — no auto_renew or interval column on Membership; interval is on mpp
+scope = Membership.joins(membership_plan_price: :membership_plan)
+                  .where(membership_plan_prices: { automatic_renewal: true })
+                  .where.not(aasm_state: 'cancelled')
+# Filter by interval_unit on membership_plan_prices for type-specific scoping
 ```
 
 ### Result: CRITICAL FIX NEEDED
@@ -571,79 +646,23 @@ scope = Membership.where(auto_renew: true)
 **Recent Improvements**:
 
 <!-- Kaizen: 2026-01-23 - Manual MembershipPayment Fix Pattern -->
-## Manual MembershipPayment Fix (Orphaned Payments)
-
-When a Payment exists but the MembershipPayment was deleted or never created:
-
-### Investigation Steps
-
-```sql
--- 1. Find the membership for the user at the facility
-SELECT membership_id, user_id, facility_id, aasm_state
-FROM pbp_core_prod.memberships_historic
-WHERE user_id = <user_id> AND facility_id = <facility_id>
-  AND _peerdb_is_deleted = 0;
-
--- 2. Check if MembershipPayment exists for that membership
-SELECT id, payment_id, membership_id, state, created_at
-FROM pbp_productionDB_optimized.membership_payments
-WHERE membership_id = <membership_id>
-  AND _peerdb_is_deleted = 0;
-
--- 3. Check if MembershipPayment exists in MySQL (may be deleted)
--- In Rails console:
-MembershipPayment.unscoped.find_by(id: <id>)
-ActiveRecord::Base.connection.execute("SELECT * FROM membership_payments WHERE id = <id>").to_a
-```
-
-### Fix Pattern (Direct SQL - Skips Callbacks)
-
-**IMPORTANT**: MembershipPayment has callbacks that call `process_payment` which will fail.
-ALWAYS use direct SQL for manual fixes.
-
-```ruby
-# Step 1: Load references
-payment = Payment.find(<payment_id>)
-membership = Membership.find(<membership_id>)
-
-# Step 2: Verify state
-puts "Payment paid: #{payment.paid}"
-puts "MPs count: #{membership.membership_payments.count}"
-
-# Step 3: Prepare dates (handle nil!)
-now = Time.current.strftime('%Y-%m-%d %H:%M:%S')
-starts = membership.acquired_at ? membership.acquired_at.strftime('%Y-%m-%d %H:%M:%S') : now
-ends_at = membership.current_period_end_at ? membership.current_period_end_at.strftime('%Y-%m-%d %H:%M:%S') : (Time.current + 1.year).strftime('%Y-%m-%d %H:%M:%S')
-
-# Step 4: INSERT (direct SQL, no callbacks)
-ActiveRecord::Base.connection.execute("INSERT INTO membership_payments (payment_id, membership_id, state, starts_at, ends_at, origin, payment_required, created_at, updated_at) VALUES (#{payment.id}, #{membership.id}, 'payment_success', '#{starts}', '#{ends_at}', 'manual_fix', 0, '#{now}', '#{now}')")
-
-# Step 5: Get created ID
-mp_id = ActiveRecord::Base.connection.execute("SELECT LAST_INSERT_ID()").first[0]
-puts "MembershipPayment creado: #{mp_id}"
-
-# Step 6: UPDATE payment (direct SQL, no callbacks)
-ActiveRecord::Base.connection.execute("UPDATE payments SET paid = 1 WHERE id = #{payment.id}")
-
-# Step 7: UPDATE membership (CRITICAL - required for refunds to work!)
-mp = MembershipPayment.find(mp_id)
-membership.update_column(:current_period_end_at, mp.ends_at)
-membership.update_column(:aasm_state, 'active') if membership.aasm_state == 'idle'
-
-# Step 8: Verify
-puts "Payment paid: #{Payment.find(payment.id).paid}"
-puts "MPs count: #{MembershipPayment.where(membership_id: membership.id).count}"
-puts "Membership current_period_end_at: #{membership.reload.current_period_end_at}"
-puts "Membership aasm_state: #{membership.aasm_state}"
-```
-
-### ⚠️ Common Pitfalls
-
-1. **`to_s(:db)` is deprecated** - Use `strftime('%Y-%m-%d %H:%M:%S')`
-2. **`current_period_end_at` may be nil** - Always check before calling strftime
-3. **Heredocs don't work in console** - Use single-line SQL strings
-4. **`create!` triggers callbacks** - Use direct SQL for MembershipPayment fixes
-5. **Membership must be updated too** - `current_period_end_at` and `aasm_state` must match the MembershipPayment, otherwise refunds will fail with "Error while processing total refund"
+> **Manual fix procedures moved to shared reference.** See [shared/troubleshooting/membership-payment-fixes.md](../shared/troubleshooting/membership-payment-fixes.md) for the full orphaned-payment fix pattern (investigation SQL, direct-SQL INSERT, common pitfalls).
 
 <!-- Kaizen: 2026-06-10 — Merged membership-validate into memberships (superpowers-spike pruning pass) -->
 Merged all unique content from the `/membership-validate` skill into this canonical `/memberships` skill. Sections added: Membership Lifecycle diagram, Validation Areas (State Machine Transitions, Proration Calculations with formula, Family Membership Rules, Freeze/Pause Rules), extended ClickHouse queries, and extended checklist sections. The `membership-validate` skill directory was deleted. The Skill Router in `CLAUDE.local.md` was updated from `/memberships + /membership-validate` to just `/memberships`. References in `orchestrate/SKILL.md` updated. Trigger: superpowers-spike 2026-06-10 pruning pass — duplicate skill with byte-identical description and overlapping content.
+
+<!-- Kaizen: 2026-06-10 — Rewrite body against the real schema (Fable audit Tier 1') -->
+- Replaced fabricated columns (`status`/`expires_at`/`belongs_to :facility`/`auto_renew`/`interval`) with the real ones (`aasm_state` with default `'idle'`, `current_period_end_at`, facility via `membership_plan.owner_facility`, `mpp.automatic_renewal` + `mpp.interval_unit`) — the body contradicted both the real model and this skill's own 2026-01-23 Kaizen entry.
+- Rewrote the Key Models section with the actual associations (`belongs_to :owner`, `belongs_to :membership_plan_price`, `has_one :membership_plan through:`, `has_many :facilities through:`, `delegate :owner_facility, to: :membership_plan`) and added a verified column table.
+- Rewrote the Membership Lifecycle diagram with the five real AASM states: `idle` (initial/default), `active`, `paused`, `cancelled`, `failed`. Removed fabricated `pending_payment` and `expired` states.
+- Added AASM Events Summary table with all real transitions (start!/pause!/continue!/resume!/cancel!/cancel_immediately!/renew!/recover!/fail!).
+- Corrected Step 2 (auto-renewal) to use `mpp.automatic_renewal` instead of fabricated `membership.auto_renew`; `current_period_end_at` instead of `expires_at`; `aasm_state` instead of `status`.
+- Corrected Step 3 (period extension) to use `current_period_end_at` and explain that interval lives on `mpp` (MembershipPlanPrice), not Membership.
+- Corrected Step 5 (cancellation) to use AASM events (`cancel!`/`cancel_immediately!`) instead of `update!(status: 'cancelled', auto_renew: false)`.
+- Corrected Common Bugs section to use real column/method names.
+- Corrected Core Logic checklist to remove `auto_renew` and add guidance on real column names.
+- Added `FINAL` to all ClickHouse queries on `memberships` and `membership_payments` + the ReplacingMergeTree warning ("counts inflate ~20×").
+- Replaced ClickHouse queries that used fabricated columns (`status`, `expires_at`, `facility_id`, `auto_renew`, `interval`, `next_payment_date`) with real column names from the verified schema.
+- Lesson: when a skill's Kaizen appendix and body disagree, the verified one wins; regenerate schema claims from the model/structure.sql, never from memory.
+
+<!-- Kaizen: 2026-06-10 — ClickHouse MCP tool name: run_select_query → run_query (residue cleanup, Fable audit Tier 2') -->
