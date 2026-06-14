@@ -10,7 +10,7 @@ disable-model-invocation: false
 ## Shared References
 
 > **📚 This skill uses shared documentation. See:**
-> - Use `Grep` for cross-package reference audits (Serena removed 2026-06-02)
+> - Use `Grep` for cross-package reference audits
 
 ## When to Use This Skill
 
@@ -72,7 +72,7 @@ grep -r "create_table" packs/*/db/migrate/ | grep -v "packs/\w\+.*:\w\+_"
 ```
 **Expected**: 0 matches (all package tables must be prefixed)
 
-> Use `Grep` and `Glob` for symbol-level discovery. (Serena removed 2026-06-02.)
+> Use `Grep` and `Glob` for symbol-level discovery.
 
 ```bash
 # 4. Check package structure validity
@@ -295,37 +295,31 @@ dependencies:
   - packs/feature_flag
 ```
 
-## Real PBP Package Violations
+### Illustrative examples (NOT from this codebase — do not cite as evidence)
 
-Real violations found in production codebase:
+These examples demonstrate common Packwerk violation patterns. They are NOT all sourced from real files or line numbers in this codebase — see notes per example.
 
-**VIOLATION 1: Privacy violation - accessing internal webhook encryptor**
+**EXAMPLE 1: Privacy violation — accessing internal package encryptor**
 ```ruby
-# ❌ BAD - Found in packs/book_a_pro/app/services/notification_service.rb:45
-# Accessing private constant from webhooks package
+# ❌ BAD - Accessing private constant from another package
 credentials = Webhooks::Internal::Encryptor.encrypt(api_key)
-
-# Impact: Privacy violation - accessing internal implementation detail
-# Risk: Webhooks package can't refactor internal encryption without breaking book_a_pro
 
 # ✅ GOOD - Use public API
 credentials = Webhooks::Url.encrypt_credentials(api_key)
 
 # Fix in package.yml:
 dependencies:
-  - packs/webhooks  # Declare dependency
+  - packs/webhooks
 ```
 
-**VIOLATION 2: Dependency violation - using feature flag without declaration**
+Note: `packs/book_a_pro/app/services/notification_service.rb` does not exist at HEAD. This is an illustrative example of the pattern.
+
+**EXAMPLE 2: Dependency violation — using a package without declaring it**
 ```ruby
-# ❌ BAD - Found in packs/merchandise/app/models/product.rb:23
-# Using FeatureFlag without declaring dependency
+# ❌ BAD - Using FeatureFlag without declared dependency
 def discounts_enabled?
   FeatureFlag::Setting.enabled?(:product_discounts, facility_id)
 end
-
-# Impact: Dependency violation - undeclared cross-package dependency
-# Risk: Package boundary enforcement broken
 
 # ✅ GOOD - Declare dependency in package.yml
 # packs/merchandise/package.yml:
@@ -333,16 +327,15 @@ dependencies:
   - packs/feature_flag
 ```
 
-**VIOLATION 3: Table naming violation - unprefixed table**
+Note: `packs/merchandise/package.yml` at HEAD has `enforce_dependencies: true` but no `dependencies` key — this is a real pattern to check but the specific `product.rb:23` citation is illustrative.
+
+**EXAMPLE 3: Table naming violation — unprefixed table**
 ```ruby
-# ❌ BAD - Found in packs/game_match/db/migrate/20231015_create_waivers.rb
-create_table :waivers do |t|  # Missing game_match_ prefix
+# ❌ BAD - Missing package prefix
+create_table :waivers do |t|
   t.references :facility
   t.string :waiver_type
 end
-
-# Impact: Table naming convention violation
-# Risk: Name collision with main app or other packages
 
 # ✅ GOOD - Prefix with package name
 create_table :game_match_waivers do |t|
@@ -351,41 +344,42 @@ create_table :game_match_waivers do |t|
 end
 ```
 
-**VIOLATION 4: Missing enforce_privacy flag**
-```yaml
-# ❌ BAD - Found in packs/orgs/package.yml
-# Package without privacy enforcement
-enforce_dependencies: true
-dependencies:
-  - packs/feature_flag
+Note: Migration `packs/game_match/db/migrate/20231015_create_waivers.rb` does not exist at HEAD. The real game_match migrations (2026-era) follow the correct `game_match_` prefix. This is an illustrative example of what the violation looks like.
 
-# Impact: Privacy violations not detected
-# Risk: Internal constants can be accessed from outside
+**EXAMPLE 4: Missing enforce_privacy flag**
+
+This example is VERIFIED: `packs/orgs/package.yml` at HEAD has `enforce_dependencies: true` but no `enforce_privacy` key.
+
+```yaml
+# ❌ Current packs/orgs/package.yml (verified 2026-06-10)
+enforce_dependencies: true
+# No enforce_privacy — privacy violations go undetected
+dependencies:
+  - "."
+  - packs/marketing_kit
 
 # ✅ GOOD - Enable privacy enforcement
 enforce_dependencies: true
-enforce_privacy: true  # Add this!
+enforce_privacy: true
 dependencies:
-  - packs/feature_flag
+  - "."
+  - packs/marketing_kit
 ```
 
-**VIOLATION 5: Circular dependency**
+**EXAMPLE 5: Circular dependency**
 ```yaml
 # ❌ BAD - Circular dependency between packages
-# packs/book_a_pro/package.yml
+# packs/pack_a/package.yml
 dependencies:
-  - packs/webhooks
+  - packs/pack_b
 
-# packs/webhooks/package.yml
+# packs/pack_b/package.yml
 dependencies:
-  - packs/book_a_pro  # Circular!
+  - packs/pack_a  # Circular!
 
-# Impact: Circular dependency prevents clean separation
-# Risk: Both packages must be loaded together, can't deploy independently
-
-# ✅ GOOD - Extract shared interface to new package
-# Create packs/notifications with common interface
-# Both book_a_pro and webhooks depend on notifications
+# ✅ GOOD - Extract shared interface to a third package
+# Create packs/shared_interface
+# Both pack_a and pack_b depend on shared_interface
 ```
 
 ## Report Format
@@ -394,7 +388,7 @@ dependencies:
 ## Packwerk Analysis
 
 ### Summary
-- Packages checked: 10
+- Packages checked: 18 (run `ls packs/ | wc -l` for current count)
 - Privacy violations: X
 - Dependency violations: Y
 - Table naming issues: Z
@@ -413,7 +407,7 @@ dependencies:
 
 #### packs/book_a_pro
 - [ ] Privacy: Accessing `Webhooks::Url` (private constant)
-  - File: packs/book_a_pro/app/services/notification_service.rb:45
+  - File: packs/book_a_pro/app/services/some_service.rb:45  _(example path — substitute real file from packwerk output)_
   - Fix: Add to public API or use public interface
 
 **CLI Fix:**
@@ -461,22 +455,30 @@ Claude:
 Running packwerk check...
 
 ### Summary
-- Packages checked: 10
+- Packages checked: 18 (run `ls packs/ | wc -l` for current count)
 - Privacy violations: 0
 - Dependency violations: 0
 
 ### Package Health
 | Package | Deps | Privacy | Tables | Status |
 |---------|------|---------|--------|--------|
+| agents_cli | OK | OK | OK | Healthy |
 | audit_logs | OK | OK | OK | Healthy |
+| billing | OK | OK | OK | Healthy |
 | book_a_pro | OK | OK | OK | Healthy |
 | camera_integrations | OK | OK | OK | Healthy |
+| electronic_invoicing | OK | OK | OK | Healthy |
 | feature_flag | OK | OK | OK | Healthy |
 | game_match | OK | OK | OK | Healthy |
+| internal_backend | OK | OK | OK | Healthy |
+| internal_frontend | OK | OK | OK | Healthy |
+| marketing_kit | OK | OK | OK | Healthy |
 | merchandise | OK | OK | OK | Healthy |
 | orgs | OK | OK | OK | Healthy |
 | orgs_frontend | OK | OK | OK | Healthy |
 | page_builder | OK | OK | OK | Healthy |
+| partners | OK | OK | OK | Healthy |
+| raffle | OK | OK | OK | Healthy |
 | webhooks | OK | OK | OK | Healthy |
 
 No action needed.
@@ -501,58 +503,6 @@ This skill works with:
 
 > "Every day we must improve" - 改善
 
-**While executing this skill**, if you discover:
-- A new package added to the project
-- A missing convention or pattern
-- A better validation approach
+If you discover a new package, missing convention, or better validation approach while running this skill, note it and run `/kaizen` after the validation is complete — do NOT self-edit this file mid-execution.
 
-**You MUST**:
-1. Complete the current packwerk validation first
-2. Then append improvements to this skill file using Edit tool
-3. Format: `<!-- Kaizen: YYYY-MM-DD --> New content`
-
-**Recent Improvements**:
-
-<!-- Kaizen: 2026-02-01 -->\n**Major consistency and clarity improvements:**
-
-1. **Added "When to Use" section** (ROI: 2.0)
-   - 5 clear triggers: adding packages, cross-package deps, deployment, PR review, refactoring
-   - Users know exactly when to invoke this skill
-
-2. **Added Quick Validation Commands** (ROI: 2.5)
-   - 5 automated checks for instant violation detection
-   - Expected output documented for each command
-   - 40% faster than manual packwerk check workflow
-
-3. **Updated all CLI commands to use bin/d** (ROI: 1.2)
-   - Replaced `docker compose exec web bundle exec` with `bin/d`
-   - Consistent with CLAUDE.local.md conventions
-   - All commands now have expected output documented
-
-4. **Added expected results to all commands** (ROI: 2.0)
-   - Clear success criteria for every validation command
-   - "0 matches = safe" vs "violations found"
-   - Users can instantly validate package health
-
-5. **Added real PBP package violations** (ROI: 1.5)
-   - 5 concrete violations from actual codebase:
-     * Privacy violation (book_a_pro accessing Webhooks::Internal)
-     * Dependency violation (merchandise using FeatureFlag)
-     * Table naming violation (game_match_waivers)
-     * Missing enforce_privacy flag (orgs package)
-     * Circular dependency (book_a_pro ↔ webhooks)
-   - Real packages: webhooks, book_a_pro, merchandise, game_match, orgs
-
-6. **Added Related Skills section** (ROI: 1.0)
-   - Links to code-review, architect, migration, performance, multi-tenancy
-   - Documents orchestrate integration for package changes
-
-**Impact:**
-- Violation detection 40% faster (Quick Validation section)
-- Command consistency 100% improved (all use bin/d)
-- Validation clarity 100% improved (expected outputs)
-- Examples 65% clearer (real package violations vs generic)
-
-**Lines changed:** 340 → ~510 (+170 lines, +50% documentation)
-**Time invested:** 20 minutes
-**ROI:** 1.7 average across all improvements
+> Improvement history archived in [`kaizen_log.md`](kaizen_log.md).
