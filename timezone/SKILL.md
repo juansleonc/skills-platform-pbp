@@ -1,7 +1,13 @@
 ---
 name: timezone
-description: Audit code for timezone safety - find Time.now usage and suggest Time.current
-allowed-tools: [Bash, Read, Grep, Glob, Edit]
+description: >
+  Audit code for timezone safety. Fires when code introduces or modifies
+  Time.now / Date.today / DateTime.now / Time.new / Time.parse usage, adds
+  date-handling logic (scheduling, memberships, reservations, billing cycles),
+  writes time-dependent specs without Timecop, or uses deprecated
+  .to_s(:format) date formatting. Suggests Time.current / Date.current /
+  facility-scoped timezone helpers and strftime replacements.
+allowed-tools: [Bash, Read, Grep, Glob]
 disable-model-invocation: false
 ---
 
@@ -149,7 +155,7 @@ facility.local_time  # Respects facility timezone
 # 1. Find Time.now violations (CRITICAL)
 grep -rn "Time\.now\|Date\.today\|DateTime\.now\|Time\.zone\.now" app/ lib/ --include="*.rb" | grep -v "# "
 ```
-**Expected**: 0 matches (all should use `Time.current` or `Date.current`)
+**Expected**: **0 new occurrences in changed lines**. Known legacy baseline (2026-06-10): ~22 `Time.now` + ~102 `Time.zone.now` in `app/` — do not report these as new findings; they are tracked debt. Focus on lines you introduced or modified.
 
 > **📖 See [ast-grep Patterns](../shared/ast-grep-patterns.md)** when `sg` is installed: `sg run --lang ruby --pattern 'Time.now' app/ lib/` matches only real call expressions — no `grep -v "# "` heuristic needed (eliminates comment/string false positives). Otherwise this grep is the right tool.
 
@@ -244,11 +250,13 @@ describe '#expires_at' do
 end
 ```
 
-## Real PBP Violations Found
+### Illustrative examples (NOT from this codebase — do not cite as evidence)
 
-### VIOLATION 1: Membership expiration calculation
+These examples demonstrate common timezone-unsafe patterns. They are NOT sourced from real files or line numbers in this codebase.
+
+### EXAMPLE 1: Membership expiration calculation (timezone-unaware)
 ```ruby
-# ❌ BAD - Found in app/models/membership.rb:178
+# ❌ BAD - Arithmetic on naive acquired_at ignores facility timezone
 def expires_at
   acquired_at + duration.days if acquired_at.present?
 end
@@ -259,10 +267,12 @@ def expires_at
 end
 ```
 
-### VIOLATION 2: Reservation time formatting
+Note: `app/models/membership.rb:178` in this codebase contains `Time.zone.now` in a pause/resume transition — a different pattern. `app/services/reservation_notifier.rb` and `app/services/payment_service.rb` do not exist at HEAD.
+
+### EXAMPLE 2: Deprecated `.to_s(:format)` on timestamps (Ruby 3)
 ```ruby
-# ❌ BAD - Found in app/services/reservation_notifier.rb:45
-starts = reservation.starts_at.to_s(:db)  # Deprecated Ruby 3
+# ❌ BAD - Deprecated Ruby 3
+starts = reservation.starts_at.to_s(:db)
 
 # ✅ GOOD - Ruby 3 compatible
 starts = reservation.starts_at.strftime('%Y-%m-%d %H:%M:%S')
@@ -271,24 +281,24 @@ starts = reservation.starts_at.strftime('%Y-%m-%d %H:%M:%S')
 starts = reservation.starts_at&.strftime('%Y-%m-%d %H:%M:%S') || 'Not scheduled'
 ```
 
-### VIOLATION 3: Payment timestamp
+### EXAMPLE 3: Time.now on payment timestamp
 ```ruby
-# ❌ BAD - Found in app/services/payment_service.rb:234
+# ❌ BAD - Not timezone-aware
 payment.update(processed_at: Time.now)
 
 # ✅ GOOD - Timezone-aware
 payment.update(processed_at: Time.current)
 ```
 
-### VIOLATION 4: Flaky spec - membership renewal
+### EXAMPLE 4: Flaky spec — time assertion without Timecop
 ```ruby
-# ❌ BAD - Found in spec/models/membership_spec.rb:89
+# ❌ BAD - Non-deterministic (real clock may drift between membership.renew! and assertion)
 it 'sets renewal date' do
   membership.renew!
   expect(membership.renewed_at).to be_within(1.second).of(Time.now)
 end
 
-# ✅ GOOD - Frozen time for deterministic tests
+# ✅ GOOD - Frozen time
 it 'sets renewal date' do
   Timecop.freeze(Time.current) do
     membership.renew!
@@ -397,50 +407,7 @@ This skill works with:
 
 **You MUST**:
 1. Complete the current timezone audit first
-2. Then append improvements to this skill file using Edit tool
-3. Format: `<!-- Kaizen: YYYY-MM-DD --> New content`
+2. Note the improvement and run `/kaizen` after the audit to persist it
+3. Format: `<!-- Kaizen: YYYY-MM-DD --> New content` (goes in `kaizen_log.md`, not inline)
 
-**Recent Improvements**:
-
-<!-- Kaizen: 2026-02-01 -->
-**Major efficiency and clarity improvements:**
-
-1. **Added "When to Use" section** (ROI: 2.0)
-   - 5 clear triggers: modifying time code, reviewing specs, Ruby 3 upgrade, flaky tests, timezone features
-   - Users know exactly when to invoke this skill
-
-2. **Added Quick Validation Commands** (ROI: 2.5)
-   - 4 automated grep patterns for instant violation detection
-   - Expected output documented for each command
-   - 40% faster than scrolling through audit process
-
-3. **Added Time.zone.now to unsafe patterns** (ROI: 2.0)
-   - Catches redundant pattern (`Time.zone.now` → `Time.current`)
-   - Rails sets Time.zone globally, so `.zone.now` is unnecessary
-
-4. **Added expected results to all grep commands** (ROI: 2.0)
-   - "Expected: 0 matches" for violations
-   - "Expected: 0-3 matches (review each)" for DST calculations
-   - Users can instantly validate if codebase is clean
-
-5. **Added real PBP violation examples** (ROI: 1.5)
-   - 4 concrete violations from actual codebase:
-     * Membership expiration (timezone-aware calculation)
-     * Reservation formatting (deprecated .to_s(:db))
-     * Payment timestamp (Time.now → Time.current)
-     * Flaky spec (Timecop.freeze pattern)
-   - Real models: Membership, Reservation, Payment
-
-6. **Added Related Skills section** (ROI: 1.0)
-   - Links to code-review, tdd, performance, sidekiq
-   - Documents orchestrate integration in Phase 1A
-
-**Impact:**
-- Audit speed 40% faster (Quick Validation section)
-- Validation clarity 100% improved (expected outputs)
-- Pattern detection +1 (Time.zone.now added)
-- Examples 60% clearer (real PBP violations vs generic)
-
-**Lines changed:** 320 → ~420 (+100 lines, +31% documentation)
-**Time invested:** 17 minutes
-**ROI:** 1.9 average across all improvements
+**Recent Improvements**: see [kaizen_log.md](kaizen_log.md) for full history.
