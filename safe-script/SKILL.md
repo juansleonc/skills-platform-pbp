@@ -14,7 +14,7 @@ Creates production-safe scripts for manual data fixes with automatic rollback an
 ## CRITICAL RULES
 
 1. **Always use SQL direct** for manual fixes (skips callbacks that can fail)
-2. **Never use heredocs** in Rails console (doesn't paste well)
+2. **Never use heredocs in Rails console** (`rails c`) — they don't paste well interactively. Runner scripts (`rails runner script.rb`) may use `<<~SQL` heredocs since they are files, not pasted input.
 3. **Always test in Docker** before running in production
 4. **Add rollback logic** to every script
 5. **Make scripts idempotent** (safe to run multiple times)
@@ -57,7 +57,7 @@ Every safe script follows this structure:
 #   bin/d runner scripts/fix_name.rb
 #
 # Production:
-#   RAILS_ENV=production bundle exec rails runner scripts/fix_name.rb
+#   RAILS_ENV=production bin/d runner scripts/fix_name.rb
 
 class SafeScriptTemplate
   def self.run(dry_run: true)
@@ -186,6 +186,9 @@ SafeScriptTemplate.run(dry_run: dry_run)
 MembershipPayment.create!(payment_id: 123, membership_id: 456)
 
 # ✅ SAFE - Direct SQL skips callbacks
+# NOTE: #{payment_id} and #{membership_id} are trusted integer AR attributes (model.id).
+# Interpolating guaranteed-integer values from AR models into SQL is acceptable in scripts
+# (see CLAUDE.local.md Rule #11). For external/user-supplied values, see Pattern 6.
 ActiveRecord::Base.connection.execute(
   "INSERT INTO membership_payments (payment_id, membership_id, created_at, updated_at) " \
   "VALUES (#{payment_id}, #{membership_id}, NOW(), NOW())"
@@ -271,19 +274,31 @@ end
 
 ### Pattern 6: SQL Injection Prevention
 
+**The single coherent rule:**
+- **Trusted integers** (AR model `.id`, `Integer()` cast on ARGV/CSV input, numeric literals) → `#{}` interpolation is **acceptable** in script context (CLAUDE.local.md Rule #11).
+- **External/uncast strings** (ARGV without cast, CSV-parsed strings, ENV values, any user-supplied text) → **always use bind params or AR methods**. Never interpolate.
+
 ```ruby
-# ❌ DANGEROUS - SQL injection risk
-user_id = params[:id]
+# ❌ DANGEROUS - external string value interpolated directly into SQL
+user_id = ARGV[0]                  # String from command line, unvalidated
+sql = "UPDATE users SET active = true WHERE id = #{user_id}"
+ActiveRecord::Base.connection.execute(sql)
+# Risk: ARGV[0] = "1 OR 1=1" → full-table update
+
+# ✅ SAFE - cast to Integer first (raises on non-integer, prevents injection)
+user_id = Integer(ARGV[0])
 sql = "UPDATE users SET active = true WHERE id = #{user_id}"
 ActiveRecord::Base.connection.execute(sql)
 
-# ✅ SAFE - Parameterized query
+# ✅ SAFE - Parameterized query (always correct regardless of source)
+user_id = ARGV[0]
 sql = "UPDATE users SET active = true WHERE id = ?"
 ActiveRecord::Base.connection.execute(
   ActiveRecord::Base.sanitize_sql([sql, user_id])
 )
 
-# ✅ SAFER - Use ActiveRecord methods
+# ✅ SAFEST - Use ActiveRecord methods (no raw SQL needed)
+user_id = ARGV[0]
 User.where(id: user_id).update_all(active: true)
 ```
 
@@ -333,14 +348,10 @@ bin/d runner scripts/fix_membership_payments.rb
 
 ```bash
 # Run against test data
-docker compose exec -e RAILS_ENV=test web bundle exec rails runner \
-  scripts/fix_membership_payments.rb
+RAILS_ENV=test bin/d runner scripts/fix_membership_payments.rb
 
 # Verify changes
-bin/d runner "
-  # Check specific records
-  puts MembershipPayment.where(payment_id: 123).inspect
-"
+bin/d runner "puts MembershipPayment.where(payment_id: 123).inspect"
 ```
 
 ### Step 5: Run in Production
@@ -348,14 +359,13 @@ bin/d runner "
 ```bash
 # ONLY after testing in Docker + review
 
-# Dry run first
-RAILS_ENV=production bundle exec rails runner scripts/fix_membership_payments.rb
+# Dry run first (production env, still dry-run by default)
+RAILS_ENV=production bin/d runner scripts/fix_membership_payments.rb
 
 # Review output carefully
 
 # If all looks good, run live
-RAILS_ENV=production LIVE=true bundle exec rails runner \
-  scripts/fix_membership_payments.rb
+RAILS_ENV=production LIVE=true bin/d runner scripts/fix_membership_payments.rb
 
 # Monitor output for errors
 ```
@@ -408,7 +418,9 @@ class BackfillMembershipPayments
     if dry_run
       log "Would create: payment_id=#{payment.id}, membership_id=#{membership.id}"
     else
-      # Direct SQL to skip callbacks
+      # Direct SQL to skip callbacks.
+      # #{payment.id} and #{membership.id} are AR integer attributes — trusted integers,
+      # not external input. Heredoc is fine here (runner script, not interactive console).
       sql = <<~SQL
         INSERT INTO membership_payments
         (payment_id, membership_id, created_at, updated_at)
@@ -534,14 +546,14 @@ Membership.find_each(batch_size: 500) { |m| fix(m) }
 ```
 
 ### Mistake 4: Not testing dry run
-```ruby
+```bash
 # ❌ DANGEROUS - Run live immediately
-RAILS_ENV=production LIVE=true rails runner script.rb
+RAILS_ENV=production LIVE=true bin/d runner script.rb
 
 # ✅ SAFE - Test dry run first
-RAILS_ENV=production rails runner script.rb  # See what would change
+RAILS_ENV=production bin/d runner script.rb  # See what would change
 # Review output
-RAILS_ENV=production LIVE=true rails runner script.rb  # Then run live
+RAILS_ENV=production LIVE=true bin/d runner script.rb  # Then run live
 ```
 
 ## Report Format
@@ -618,23 +630,6 @@ WHERE created_at > '2024-01-28 10:30:00'
 
 ## Kaizen: Continuous Improvement
 
-> "Every day we must improve" - 改善
+> Historical entries archived to [kaizen_log.md](kaizen_log.md). Append new findings there; promote proven rules into the active body above.
 
-**While executing this skill**, if you discover:
-- A new safe pattern for data fixes
-- A common mistake to document
-- A better testing workflow
-
-**You MUST**:
-1. Complete the current script first
-2. Then append improvements to this skill file using Edit tool
-3. Format: `<!-- Kaizen: YYYY-MM-DD --> New content`
-
-**Recent Improvements**:
-<!-- Kaizen entries will be added here -->
-
-<!-- Kaizen: 2026-05-22 - User correction -->
-- Rule: Respect approved scope before a script makes a destructive step (DELETE/cleanup) a default/enforced action — never institutionalize a step the ticket marked out-of-scope. Approval of X (e.g. links) ≠ approval to delete other tables.
-- Why: In CORE-624 I nearly baked faves/user_stats deletion into the cleanup as an enforced default; the user caught that Erick had scoped those tables out — the exact scope creep (L3) that TRIAGE-10's prod script committed (deleted 200K faves the runbook marked out-of-scope).
-- How to apply: Before a script deletes from a table by default, re-read the approval record ("Out of scope / Pendiente / cleanup separado"). If out of scope: leave it out or make it strictly opt-in (flag default OFF) pending separate sign-off. Distinguish integrity consequences of an approved action (touch/reindex) from new destructive ops on other tables.
-- Source: User correction on 2026-05-22. See `memory/feedback_respect_approved_scope.md`.
+**While executing this skill**, if you discover a new safe pattern, a common mistake, or a better workflow: append to `kaizen_log.md` with format `<!-- Kaizen: YYYY-MM-DD --> ...`, then run `/kaizen` to promote if warranted.
