@@ -29,10 +29,10 @@ Validates Sidekiq jobs follow Ruby 3 compatibility patterns, idempotency require
 
 ## CRITICAL RULES
 
-1. **Single Hash Argument** - All jobs receive one hash argument (Ruby 3 compatibility)
+1. **Single Hash Argument (NEW JOBS)** - New jobs must use one hash argument (`def perform(args)`) for Ruby 3 compatibility. When MODIFYING legacy jobs, follow the existing positional-arg pattern — do not rewrite the signature unless it is a full job rewrite.
 2. **Payment Jobs MUST be Idempotent** - Same input always produces same result
 3. **Initialize Before Try** - Variables must be initialized before try/rescue blocks
-4. **Deep Symbolize Keys** - Always call `args.deep_symbolize_keys`
+4. **Deep Symbolize Keys** - Always call `args.deep_symbolize_keys` on hash-arg jobs
 5. **Use ErrorService** - Centralized error reporting (not separate logger + Honeybadger)
 6. **Redis Locks** - Prevent concurrent execution of same job
 
@@ -74,9 +74,9 @@ class ProcessPaymentJob < ApplicationJob
     rescue ActiveRecord::RecordNotFound => e
       # Variables accessible here for logging
       Rails.logger.error("Payment job failed: facility=#{facility_id}, payment=#{payment_id}")
-      Honeybadger.notify(e, context: { facility_id: facility_id, payment_id: payment_id })
+      ErrorService.new(e, context: { facility_id: facility_id, payment_id: payment_id }).notify
     rescue => e
-      Honeybadger.notify(e, context: args)
+      ErrorService.new(e, context: args).notify
       raise # Re-raise for Sidekiq retry
     end
   end
@@ -137,8 +137,7 @@ class PreSaleMembershipsActivationJob < ApplicationJob
     membership.start!  # State machine transition
   rescue StandardError => e
     # Individual failure doesn't stop batch
-    Rails.logger.error("Failed to activate membership #{membership.id}: #{e.message}")
-    Honeybadger.notify(e, context: { membership_id: membership.id, facility_id: facility.id })
+    ErrorService.new(e, context: { membership_id: membership.id, facility_id: facility.id }).notify
   end
 end
 ```
@@ -175,7 +174,7 @@ class SendWelcomeEmailJob < ApplicationJob
     # Mark as processed
     mark_as_sent(idempotency_key)
   rescue StandardError => e
-    Honeybadger.notify(e)
+    ErrorService.new(e, context: { user_id: user_id, idempotency_key: idempotency_key }).notify
     raise  # Re-raise for Sidekiq retry
   end
 
@@ -249,24 +248,25 @@ end
 **Fast Sidekiq job pattern detection** (run these first):
 
 ```bash
-# 1. Find jobs with multiple arguments - Ruby 3 VIOLATION (CRITICAL)
-grep -rn "def perform(" app/jobs/ --include="*.rb" | grep -v "def perform(args)"
+# 1. Find NEW jobs with multiple arguments - Ruby 3 VIOLATION (CRITICAL)
+# Scope this to changed files only (e.g. from git diff):
+git diff develop --name-only -- app/jobs/ | xargs grep -n "def perform(" 2>/dev/null | grep -v "def perform(args)\|def perform()\|def perform$"
 ```
-**Expected**: 0 matches (all jobs should use single hash argument)
-**If found**: Ruby 3 incompatible - must migrate to `def perform(args)`
+**Expected**: **0 new violations in changed/added jobs**. Known legacy baseline (2026-06-10): ~77 of 92 `perform` definitions in `app/jobs/` use positional args — per CLAUDE.md, follow existing patterns when MODIFYING legacy jobs; the hash pattern (`def perform(args)`) is required for **NEW jobs only**. Do not report the ~77 legacy jobs as new findings.
+**If found in new/rewritten jobs**: Ruby 3 incompatible — must use `def perform(args)`
 
 ```bash
-# 2. Find jobs missing deep_symbolize_keys (HIGH RISK)
-grep -L "deep_symbolize_keys" app/jobs/*.rb
+# 2. Find new jobs missing deep_symbolize_keys (HIGH RISK)
+# Scope to changed files:
+git diff develop --name-only -- app/jobs/ | xargs grep -L "deep_symbolize_keys" 2>/dev/null
 ```
-**Expected**: 0 files (all jobs must symbolize keys)
-**If found**: May crash with string keys from Sidekiq serialization
+**Expected**: 0 new jobs missing symbolize_keys (only applies to jobs using the hash pattern)
 
 ```bash
 # 3. Find payment jobs missing idempotency (CRITICAL)
 grep -rn "payment\|Payment" app/jobs/ --include="*.rb" | grep -v "idempotency"
 ```
-**Expected**: 0 matches (all payment jobs need idempotency checks)
+**Expected**: 0 new payment jobs without idempotency checks. Review results against `git diff develop` to identify new or modified jobs only.
 **If found**: Risk of duplicate charges/processing
 
 > **📖 See [ast-grep Patterns](../shared/ast-grep-patterns.md)** when `sg` is installed: `sg run --lang ruby --pattern '$JOB.perform_async($ARG)' --json=stream` yields structured `JOB`/`ARG` captures, so you can audit the exact argument shape (e.g. `payment.id`) rather than text-matching "payment". Otherwise this grep is the right tool.
@@ -501,7 +501,7 @@ class SendEmailJob < ApplicationJob
     rescue ActiveRecord::RecordNotFound
       Rails.logger.warn("SendEmailJob: User #{user_id} not found")
     rescue => e
-      Honeybadger.notify(e, context: args)
+      ErrorService.new(e, context: args).notify
       raise
     end
   end
@@ -550,10 +550,10 @@ class ChargeSubscriptionJob < ApplicationJob
   rescue ActiveRecord::RecordNotFound => e
     Rails.logger.error("Subscription #{subscription_id} not found")
   rescue PaymentFailedError => e
-    Honeybadger.notify(e, context: { subscription_id: subscription_id })
+    ErrorService.new(e, context: { subscription_id: subscription_id }).notify
     # Don't re-raise - manual intervention needed
   rescue => e
-    Honeybadger.notify(e, context: args)
+    ErrorService.new(e, context: args).notify
     raise # Re-raise for retry
   end
 
@@ -607,18 +607,23 @@ mcp__honeybadger__get_fault:
 
 ### Common Job Error Patterns to Check
 
-```sql
--- ClickHouse: Find jobs with high error rates
-SELECT
-  job_class,
-  count(*) as total_errors,
-  countIf(error_message LIKE '%timeout%') as timeouts,
-  countIf(error_message LIKE '%RecordNotFound%') as not_found
-FROM pbp_productionDB_optimized.sidekiq_errors
-WHERE created_at > now() - INTERVAL 7 DAY
-GROUP BY job_class
-ORDER BY total_errors DESC
-LIMIT 20;
+> **Note**: There is no `sidekiq_errors` table (or any `*error*` table) in `pbp_productionDB_optimized` — Sidekiq errors are NOT replicated to ClickHouse (verified 2026-06-10). Use Honeybadger or the Sidekiq retry/dead sets instead:
+
+```
+# Find job errors by class in Honeybadger:
+mcp__honeybadger__list_faults:
+  project_id: <project_id>
+  q: "JobClassName"
+
+mcp__honeybadger__get_fault:
+  project_id: <project_id>
+  fault_id: <fault_id>
+```
+
+```bash
+# Inspect retry/dead sets via Rails console in Docker:
+bin/d rails runner "puts Sidekiq::RetrySet.new.select { |j| j.klass == 'MyJob' }.count"
+bin/d rails runner "puts Sidekiq::DeadSet.new.select { |j| j.klass == 'MyJob' }.first&.error_message"
 ```
 
 ### ErrorService Best Practices
@@ -823,3 +828,12 @@ This skill works with:
 **Lines changed:** 645 → ~730 (+85 lines, +13% documentation)
 **Time invested:** 15 minutes
 **ROI:** 1.9 average across all improvements
+
+<!-- Kaizen: 2026-06-10 — Fabrication purge / honest baselines (Fable audit Tier 2') -->
+- "Expected: 0 matches" for multi-argument perform reframed with honest baseline: 77 of 92 `perform` definitions in `app/jobs/` use positional args (verified 2026-06-10). The hash pattern (`def perform(args)`) is required for NEW jobs only; legacy positional-arg jobs follow existing patterns per CLAUDE.md. Quick Validation check #1 now scopes the grep to `git diff develop --name-only -- app/jobs/` to catch new violations only, not the legacy backlog.
+- CRITICAL RULES rule #1 clarified: "Single Hash Argument (NEW JOBS)" with explicit note to follow existing patterns when modifying legacy jobs.
+- Lesson: "Expected: 0 NEW in changed lines" — legacy baselines must be stated explicitly so auditors don't flood PRs with stale findings.
+
+<!-- Kaizen: 2026-06-10 — ClickHouse SQL run-test pass (Fable re-audit theme: CH SQL was never executed) -->
+- Removed the `pbp_productionDB_optimized.sidekiq_errors` query: that table does not exist and there is no `*error*` table in `pbp_productionDB_optimized` (verified 2026-06-10). Replaced with: Honeybadger MCP (`mcp__honeybadger__list_faults` filtered by job class) and `bin/d rails runner` over the Sidekiq retry/dead sets.
+- Ground truth: payments columns + table list verified against production ClickHouse by the coordinator on 2026-06-10; `system.query_log` is not accessible in this environment.
