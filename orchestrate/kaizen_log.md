@@ -1956,6 +1956,251 @@ bundle exec rake mcp:metrics:performance # Time savings analysis
 ---
 
 *This log is updated after each kaizen session. For current skill state, see [skill.md](skill.md).*
+
+---
+
+## Inline Kaizen Entries Archived from SKILL.md — 2026-06-14
+
+> The following 21 entries were carried inline in SKILL.md as `<!-- Kaizen: ... -->` HTML comments.
+> They were moved here verbatim on 2026-06-14 to reduce per-invocation token load.
+> The three most recent 2026-06-13 entries remain inline in SKILL.md.
+
+<!-- Kaizen: 2026-05-25 - Pure-coordinator refactor -->
+- **`/orchestrate` is now a PURE administrative coordinator.** It never edits files or runs mutating commands; ALL work is delegated to subagents via the `Agent` tool (separate sessions). Added the **Coordinator Contract** (MAY/MUST-NEVER) and **Delegation Protocol** (phase→subagent_type + dispatch template) sections.
+- Frontmatter `allowed-tools` stripped of `Bash`/`Edit`/`Task` and the `mcp__serena__*` write wildcard → `[Agent, Read, Grep, Glob, AskUserQuestion, Skill, mcp__serena__(read-only)]`. `Skill` is contract-limited to non-mutating skills (`/grill-me`, `/bitacora`, `/learning`).
+- Created dedicated subagents `.claude/agents/worker.md` (sonnet; Edit/Write/Bash/Skill; follows the named skill + contracts) and `.claude/agents/validator.md` (opus; read-only; adversarial creator/verifier).
+- Wired the two structural additions: **Phase 0a `/grill-me`** (emit validation contracts, coordinator-direct) before architect, and **Gate 3.5 Validator** (blocking, independent agent verifies every contract) between TDD and Quality. Updated Master Dependency Graph, Parallel Execution Rules, Phase Gates, Quality Gate, Example Session, Status Tracking, Best Practices.
+- Runtime facts honored: subagents can't spawn subagents (so `code-simplifier` is a coordinator-dispatched phase, not worker-triggered) and can't use `AskUserQuestion` (so grill-me stays coordinator-direct). `.claude/agents/*` load at session start — restart to pick up new agents.
+- **Dispatch mode decided: foreground by default, background on-demand.** Foreground is already parallel (batch of `Agent` calls) and returns synchronously → gates stay simple/reliable for the dependency chain. Escalate to `run_in_background`/`ctrl+b` only for long workers or multi-surface fan-out (then visible in the `~/.claude/jobs/` dashboard). Never background the serial gated phases. Added a "Dispatch mode" subsection to the Delegation Protocol.
+- ROI: makes "the coordinator never touches code" enforceable by construction (separate sessions) and bakes creator/verifier separation into the flow.
+
+<!-- Kaizen: 2026-01-24 - MCP Integration Update -->
+- Integrated: 7 new MCPs across 10 skills:
+  - `github` → fix-issue, create-pr, commit, code-review, debug
+  - `opensearch` → performance, debug, code-review
+  - `rails` → performance, debug
+  - `playwright` → tdd
+  - `mermaid` → architect, code-review
+  - `stripe` → gateway-test, pci-compliance
+- Added: MCP usage documentation to each integrated skill
+- Total MCPs available: 14 (clickhouse, context7, honeybadger, sentry, github, opensearch, rails, playwright, mermaid, stripe, filesystem, figma, terraform, kubernetes)
+
+<!-- Kaizen: 2026-01-24 - Major Skills Ecosystem Update -->
+- Added: 3 new skills (`/pci-compliance`, `/gateway-consistency`, `/membership-validate`)
+- Updated: Skills count from 21 to 24
+- Split: Phase 1 into Phase 1A (static analysis) and Phase 1B (domain skills)
+- Changed: Domain skills now run in PARALLEL (not sequential)
+- Added: Phase 2.5 for code validation (sidekiq, performance, multi-tenancy)
+- Added: 3 new workflows: `/orchestrate refactor`, `/orchestrate security-hardening`, `/orchestrate performance-optimize`
+- Added: Quality Gate Pattern (common pattern across all workflows)
+- Updated: Context-aware skill selection for payment code
+- Updated: Master Dependency Graph with new phases
+
+<!-- Kaizen: 2026-01-22 -->
+- Added: `/architect` skill as PHASE 0 (before analysis)
+- Updated: Skills count from 20 to 21
+- Updated: Master Dependency Graph with architect phase
+- Updated: Feature Development workflow with architect step
+- Added: Context-aware selection for when to run architect automatically
+
+<!-- Kaizen: 2026-01-26 - Meta-Skill Integration -->
+- Added: `/kaizen` meta-skill for continuous improvement
+- Purpose: Systematic skill quality assurance and enhancement
+- Created: New "Meta Skills" category in skill list
+- Added: Workflow 13 - Skill Improvement (Kaizen)
+- Triggers: Automatic (every 10 executions, after failures), manual, scheduled
+- Philosophy: "Sharpen the saw" - skills must evolve with the codebase
+- Updated: Skills count from 24 to 25
+- Integration: kaizen checks can be invoked by orchestrate workflows
+- Next: Implement automatic kaizen triggers in orchestration logic
+
+<!-- Kaizen: 2026-01-28 - MCP Integration Lessons & Stability Focus -->
+**Critical Lessons Learned from MCP Experiment:**
+- **Lesson 1: Prefer Simple Over Complex** - Grep-based validation (instant) > Custom AST tools (timeouts, false negatives)
+- **Lesson 2: Manual Review > Unreliable Automation** - 14% detection rate proved custom MCP tools generated negative ROI (-88%)
+- **Lesson 3: Official MCP Tools are Manual Aids** - Context7, ClickHouse, Honeybadger are MANUAL research tools, not automatic validators
+- **Lesson 4: Never Delete Without Backup** - Catastrophic loss of 160 hours work taught us: always verify understanding before destructive operations
+- **Lesson 5: Validate Before Executing** - rm commands, git operations, and destructive actions require explicit confirmation
+
+**Skills Restored to Stable State:**
+- Removed: All SkillMcpIntegration.rb dependencies (broken custom tools)
+- Removed: lib/skill_mcp_integration.rb, lib/mcp_client_helper.rb (negative ROI)
+- Removed: mcp-tools/ directory (8 custom tools with 86% false negative rate)
+- Restored: Clean skills from `.claude/skills copy/` backup (795 lines vs 1027 broken)
+- Strategy: Use official MCP (Context7, ClickHouse, Honeybadger) MANUALLY for context/research only
+
+**Official MCP Usage (Manual Only):**
+- Context7: Manual docs lookup when encountering unfamiliar APIs/patterns
+- ClickHouse: Manual production data queries for debugging/validation
+- Honeybadger: Manual error investigation for production issues
+- **NEVER**: Automatic batch analysis, automatic validators, or skill dependencies on MCP tools
+
+**New Stability Rules:**
+1. All validators use grep/direct file analysis (instant, reliable)
+2. All skills must work WITHOUT MCP tools (fallback gracefully)
+3. MCP tools are optional research aids, NEVER required dependencies
+4. Before rm/git commands: verify understanding, confirm with user
+5. Complex integrations require backup/commit before changes
+
+**ROI Reality Check:**
+- Custom MCP Tools: -88% ROI (eliminated)
+- Manual Review: +1,700% ROI (baseline strategy)
+- Official MCP (manual): ∞ ROI (free, on-demand, no maintenance)
+
+
+<!-- Kaizen: 2026-01-31 - Code Simplifier Integration Documentation -->
+**What Changed:**
+- Added "Code Simplifier Integration Points" section before Orchestration Workflows
+- Documented 3 integration tiers (ALWAYS, MANDATORY, OPTIONAL)
+- Mapped code-simplifier usage in Feature Development, Bug Fix, and Coverage workflows
+- Added performance impact analysis per tier
+- Created "When code-simplifier Runs" summary table
+
+**Why:**
+- code-simplifier now integrated in 5 skills (tdd, coverage, code-review, performance, factory-check)
+- Orchestrate coordinates workflows → users need to understand when optimization happens
+- Prevent confusion: "Why did my code change?" → Document automatic vs user-triggered
+- Enable informed decisions: Users can choose workflows based on optimization preferences
+
+**Impact:**
+- Workflow transparency: Users know code-simplifier runs 4x in feature workflow, 2x in bugfix
+- Performance expectations: 30-60s overhead, hours saved in test execution
+- Clear tier documentation: ALWAYS (automatic), MANDATORY (included), OPTIONAL (user choice)
+- Integration map shows exactly where in each workflow optimization occurs
+
+**Lessons Learned:**
+- When agents/tools run automatically, MUST document in orchestrate
+- Integration tiers eliminate confusion about automation
+- Workflow diagrams should show optimization points inline
+- Performance impact analysis helps users decide if overhead is worth it
+
+**ROI**: 2.0 (High clarity benefit for users, Medium effort - comprehensive documentation)
+
+<!-- Kaizen: 2026-02-02 - Bitácora Integration -->
+**What Changed:**
+- Added `/bitacora` skill to Meta Skills table
+- Added `/bitacora`, `/log` to explicit_commands for auto-execution
+- Created "Bitácora Integration" section with:
+  - Automatic triggers during workflows (decisions, blockers, learnings)
+  - Integration points in orchestration phases
+  - Manual commands reference
+  - Example entry from workflow
+
+**Why:**
+- Developer traceability: Track technical decisions and their rationale
+- Knowledge capture: Document blockers and how they were resolved
+- Learning retention: Capture insights for future sessions
+- Session continuity: Easy handoff between sessions with documented context
+
+**Integration Points:**
+- PHASE 0 (Architecture): Record DECISION entries for design choices
+- PHASE 1-2 (Analysis + TDD): Record BLOCKER on failures, LEARNING on discoveries
+- PHASE 3 (Quality): Record LEARNING for significant review insights
+- END OF SESSION: Optional daily summary prompt
+
+**Skill Locations:**
+- Skill: `~/.cursor/skills/bitacora/SKILL.md`
+- Entries: `~/.cursor/bitacora/YYYY-MM-DD.md`
+
+**ROI**: 2.5 (High traceability value, personal knowledge base, low overhead)
+
+<!-- Kaizen: 2026-02-19 - investigations/ Folder Convention (CORE-189) -->
+**New convention: `investigations/CORE-[id]/` for local ticket research notes**
+
+- **What**: Each ticket may generate research notes, API exploration scripts, and scratch findings. These live in `investigations/CORE-[id]/` at the repo root.
+- **Exclusion mechanism**: Use `.git/info/exclude` (NOT `.gitignore`).
+  - `.gitignore` is team-wide and committed — don't pollute it with personal folders.
+  - `.git/info/exclude` is local-only (never committed), equivalent to a personal `.gitignore`.
+  - Add entry: `investigations/` to `.git/info/exclude`.
+- **End-of-session prompt**: When wrapping up a feature session, suggest moving any temporary investigation files (e.g., `tmp/test_issue.rb`, API exploration notes) into `investigations/CORE-[id]/` before closing.
+- **Example structure**:
+  ```
+  investigations/
+  └── CORE-189/
+      ├── api_exploration.md      # Manual API call results
+      ├── patch_contacts_notes.md # Findings on Contacts.all filter bug
+      └── tmp_test.rb             # Scratch script used during debugging
+  ```
+- **ROI**: 2.0 (Keeps research findable across sessions without polluting the repo)
+
+<!-- Kaizen: 2026-02-19 - Check investigations/ BEFORE starting work (CORE-189 lesson) -->
+**Critical lesson: Always read `investigations/CORE-[id]/` BEFORE doing ANY research or investigation.**
+
+- **What happened**: CORE-189 session generated a complete Patch CRM reference guide
+  (`patch-integration-reference.md`), QA audit report, and manual test scripts in
+  `investigations/CORE-189/`. Without the habit of checking this folder first, a future
+  session working on Patch would re-research all of it from scratch (2+ hours wasted).
+- **Rule added**: `🗂️ Step 0: Check Investigations Folder` added to orchestrate Smart Detection
+  section — runs before any ticket work starts.
+- **Rule added**: Same step added to `/architect` as "Step 0" before "Step 1: Understand
+  the Requirement".
+- **Command**: `ls investigations/CORE-189/` — zero overhead if empty, huge save if populated.
+- **End-of-session habit**: After completing a ticket, move scratch scripts and notes into
+  `investigations/CORE-[id]/` so the next session finds them immediately.
+- **ROI**: 3.0 (High — prevents hours of re-work, Low effort — one ls command)
+
+<!-- Kaizen: 2026-05-09 - Learning Skill Added -->
+- Added: `/learning` skill — hybrid trigger captures user corrections to auto-memory + skill kaizen sections
+- Why: Each correction was being lost; user had to manually create feedback_*.md files
+- Mechanism: Skill + CLAUDE.local.md rule #15 (no real auto-trigger; depends on model discipline reading CLAUDE.local.md)
+- Limitation: ~90% reliable (vs 100% if hooks were available)
+- Integration: Reads existing memory format (feedback_<topic>.md), writes kaizen entries in standard format
+- Skill mapping: 16 categories of correction topics → relevant skills (default: code-review)
+- ROI: 3.0 (High value — prevents repeat mistakes, Low effort — reuses existing memory infrastructure)
+
+<!-- Kaizen: 2026-05-22 - User correction -->
+- Rule: Respect approved scope before enforcing a destructive step (DELETE/cleanup) — never make one a default/enforced behavior if the ticket marked it out-of-scope. Approval of X (e.g. links) ≠ approval to delete other tables.
+- Why: In CORE-624 I nearly baked faves/user_stats deletion into the engine as an enforced default; the user caught that Erick had scoped those tables out — the exact scope creep (L3) I had criticized in TRIAGE-10.
+- How to apply: Before adding a destructive step as default/enforced, re-read the approval record ("Out of scope / Pendiente / cleanup separado"). If out of scope: leave it out or strictly opt-in pending separate sign-off. Distinguish integrity consequences of an approved action (touch/reindex) from new destructive ops on other tables.
+- Source: User correction on 2026-05-22. See `memory/feedback_respect_approved_scope.md`.
+
+<!-- Kaizen: 2026-05-25 - User correction -->
+- Rule: When a dispatched worker creates extracted/spillover files, they MUST land in a gitignored location if the source was personal/local. NEVER put personal files in `docs/` (committed team docs).
+- Why: Optimizing `CLAUDE.local.md` (gitignored), I had files extracted into `docs/development/` — which is committed. Personal workflow notes would have shipped to the team repo. User: "si son local no deben estar donde es la doc de todo el equipo".
+- How to apply: Before dispatching a worker to create files derived from a personal/local source, instruct it to verify the destination with `git check-ignore <path>`. In this repo: `docs/` = team/committed; `investigations/` and `.claude/` = personal/excluded (`.git/info/exclude`).
+- Source: User correction on 2026-05-25. See `memory/feedback_personal_files_excluded_location.md`.
+
+<!-- Kaizen: 2026-05-26 - Wire RPI template into Step 0 -->
+- **What**: `investigations/_RPI-TEMPLATE.md` (RPI = Research/Plan/Implement, "No Vibes Allowed"/Dex Horthy) existed but was referenced nowhere — used only when remembered. Wired it into **Step 0**: when `investigations/<TICKET>/` is empty, the first worker seeds `understanding.md` from the template (`cp`), and the seeded artifacts map onto existing phases (Research→`/architect`, Plan→`<feature>-design.md`, Implement→`findings.md`). grill-me contracts → `validation-contracts.md`. Also added the RPI scaffold to the CLAUDE.local.md Workflow section (always-on).
+- **Why**: Recent tickets (CORE-526/CORE-220) already used RPI artifacts ad-hoc, but with naming drift (CORE-639 used `root-cause`/`backfill-design` instead of `understanding`/`findings`). No enforcement = inconsistent. User chose "cablear en orchestrate Step 0".
+- **How to apply**: Step 0 worker seeds from template before any code; coordinator only reads. Honors pure-coordinator contract (worker does the `cp`/writes) and the "no personal files in docs/" rule (`investigations/` is gitignored).
+- ROI: 2.0 (consistency + cross-session legibility, near-zero overhead — one `cp`).
+
+<!-- Kaizen: 2026-06-05 - User correction (validator dispatch evidence) -->
+- Rule: When dispatching a `validator`/adversarial agent to verify a conclusion or diff, pass it the RAW evidence (files, diff, original research), not just the coordinator's distilled summary — with attack framing. Conclusion-visibility is fine (creator-verifier design); summary-only injects shared-premise bias so the validator can only contest the thesis, never the coordinator's reading of the facts. For load-bearing decisions, run a BLIND independent pass (fresh agent forms its own verdict from raw inputs, unaware of the coordinator's) as a clean tie-breaker, then reconcile.
+- Why: obra/superpowers spike — 3 adversarial lenses dispatched with the synthesized conclusion but not the two raw research reports; only one partially flagged the narrowed scope. User: "¿deberías pasarle contexto o eso genera sesgo?".
+- How to apply: invariant/fact-checker dispatch → explicit claims (ground-truth blinds anchoring); reasoning/Inverter dispatch → conclusion + attack framing + raw inputs; high-value gate → add a blind-pass tie-breaker agent.
+- Source: User correction on 2026-06-05. See `memory/feedback_review_raw_evidence_not_summary.md`.
+
+<!-- Kaizen: 2026-06-05 - User direction (confirm-loop protocol) -->
+- Rule: When a dispatched validator/adversarial pass returns findings, run a GATED confirm-loop, not a blind one. Per finding: (1) gate on real + in-scope (`git diff develop...HEAD`) + reproducible; (2) route confirmation by type — code→worker reproduces LOCALLY with a failing test; API/lib→Context7; "does it happen in prod / what scale"→ClickHouse (`FINAL` on ReplacingMergeTree + replica-lag guard) or Honeybadger; MCP stays a MANUAL research aid (automated MCP had −88% ROI), ≥2 sources on load-bearing claims; (3) document each CONFIRMED finding in `investigations/<ticket>/findings.md` (gitignored) so the loop survives compaction; (4) terminate on 2 consecutive clean passes or a cap; (5) coordinator autonomy ends at the action gate — commit/push, destructive ops, and outward comms still require explicit user `y/n`.
+- Why: a blind loop amplifies false positives and never terminates; gating + termination + document-confirmed give the "best panorama without waiting for manual" that the user wants, safely.
+- Source: User direction on 2026-06-05. See `memory/feedback_confirm_loop_adversarial_findings.md`.
+
+<!-- kaizen 2026-06-09: "implement the plan" = classify by executor first -->
+When the user says "implement the plan / do it" over a plan, run a CLASSIFICATION pass before any coding: tag each item {me-now / user-interactive-action / external-sign-off-gated / no-op}. Adoption/meta/strategy plans often have little-to-no code-for-me — do only the me-now subset (gitignored prep), hand the user their commands, DRAFT (never auto-send/commit) gated items, and name no-ops as done-by-decision. Do not fabricate busywork or cross a sign-off/commit/destructive gate. See memory feedback_implement_plan_classify_by_executor.
+
+<!-- Kaizen: 2026-06-09 — Worker STATUS enum + NEEDS_CONTEXT handling (adapted from obra/superpowers, MIT) -->
+- Added STATUS enum (`DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT`) to the reusable dispatch template RETURN line.
+- Rule: a subagent that hits genuine ambiguity returns NEEDS_CONTEXT — it CANNOT call AskUserQuestion (one level deep). The coordinator fields the question and re-dispatches with the answer rather than letting the worker guess.
+- Why: without a typed status the coordinator had to parse free-text prose to detect stalls; NEEDS_CONTEXT makes the escalation path explicit and prevents workers from making up answers to unresolvable ambiguity.
+
+<!-- Kaizen: 2026-06-10 — Purge stale tool/skill references (superpowers-spike 2026-06-10 drift findings) -->
+- Removed: `/bitacora` from allowed skills (Coordinator Contract, explicit_commands, execution locus note, Meta Skills table) — skill never existed in this repo; the entire "Bitácora Integration" section collapsed to a one-line tombstone note. Historical Kaizen log entries preserved.
+- Reduced: "Serena MCP" subsection from a 7-line "currently available" description to a one-liner tombstone noting removal date and backup path. Removed Serena references from the ast-grep paragraph.
+- Updated: `/membership-validate` → `/memberships` in Domain Skills table, Phase 1B diagram, parallel rules table, context-aware selection table (skill was merged into `/memberships` 2026-06-10).
+- Lesson: stale tool/skill references in the coordinator prompt mislead dispatch decisions — a skill listed as "available" that doesn't exist causes wasted agent cycles on a false dependency. Prune on every superpowers-spike pass.
+
+<!-- Kaizen: 2026-06-10 - Model routing policy (model follows task, not agent type) -->
+- Added: **Model** column to the Phase → subagent_type table + a "Model routing rule" blockquote in the Delegation Protocol.
+- Policy: Phase 1A/1B pattern-scan analysts dispatch with `model: "sonnet"`; `/adversarial-review` lenses dispatch with `model: "opus"` (changed in that skill same date); architect stays opus-pinned; **validator upgraded `opus` → `fable` in frontmatter** (adversarial verification is the highest-leverage model spend); worker stays sonnet with escalation → `model: "opus"` after 2 validator REQUEST CHANGES on the same contract (loop tax > one expensive pass).
+- Why: subagent model inheritance meant standalone `/adversarial-review` lenses ran on whatever the session model was, while a blanket "Explore → sonnet" rule would have degraded the highest-leverage reasoning spend. Route by task nature, never by subagent_type alone.
+
+<!-- Kaizen: 2026-06-13 - User correction (coordinator delegates ALL work, incl. its own reads/investigation) -->
+- Rule: The coordinator orchestrates and nothing more — it delegates ALL real work. `Read` of a known path only for trivial planning peeks; any real investigation (sweep, count, drift audit, multi-file search) → `Agent(Explore)`; `Bash`/`Edit`/`Write`/mutating commands → NEVER the coordinator. Even `/learning` persistence (memory + skill kaizen writes) is delegated to a worker — the coordinator drafts the content, the worker writes it.
+- Why: the contract protects (1) no-mutation-by-tool-boundary and (2) a clean coordinator context for gating; investigating in-thread breaks both. In sessions where `Grep`/`Glob` are not available as tools, the only search is `Bash grep/find` — delegate the search to `Agent(Explore)` rather than run `Bash` yourself.
+- How to apply: every /orchestrate run, from grill-me grounding onward. Heuristic: "is this read only to decide whom I dispatch, or IS it the investigation?" → if the latter, delegate. Corollary: the contract's "coordinator MAY invoke /learning in-thread" still routes the actual writes through a worker.
+- Source: User correction on 2026-06-13. See `memory/feedback_coordinator_delegates_all_work.md`.
 ## Entry: 2026-01-28 - MCP Health Check Fix + Diagnostics
 
 **Date**: 2026-01-28

@@ -1,7 +1,7 @@
 ---
 name: orchestrate
 description: Use when a task spans multiple skills or subagents and needs planning, delegation, quality-gating, and aggregation. Pure coordinator — never edits files or runs mutating commands itself.
-allowed-tools: [Agent, Read, Grep, Glob, AskUserQuestion, Skill]
+allowed-tools: [Agent, Read, Grep, Glob, AskUserQuestion, Skill, Workflow]
 disable-model-invocation: false
 ---
 
@@ -16,6 +16,7 @@ disable-model-invocation: false
 - **Ask the user**: `AskUserQuestion` — to grill requirements (Phase 0a) and to request approval at gates.
 - **Plan & track**: decompose the task into phases; keep a running status of what was dispatched and what came back.
 - **Dispatch subagents**: launch one or many via `Agent` (`subagent_type: ...`), in parallel or serial, passing each the context it needs.
+- **Delegate stateless fan-out to Workflow**: call the `Workflow` tool to orchestrate deterministic multi-agent pipelines for stateless, headless phases (e.g. Phase 1A/1B parallel analysts, Phase 3 quality checks, adversarial-review find→verify pipeline). A `Workflow` call is VALID delegation — the workflow's own agents run in their own sessions and do the editing/analysis there. Calling `Workflow` is NOT the coordinator "doing work"; it is the same as dispatching via `Agent`, just with a deterministic JS script instead of a free-form prompt. The coordinator never touches files regardless.
 - **Aggregate & gate**: collect subagent results, synthesize by severity, decide whether a phase gate passes, and report.
 - **Invoke ONLY these non-mutating skills in the main thread** via `Skill`: `/grill-me`, `/learning`. (They interview the user; they never touch project code.)
   - **One controlled exception — `/receiving-code-review` (triage phase only)**: may be invoked in-thread to gather inbound PR/bot feedback and run the read-only confirm-loop gate (Read/Grep/Glob/`AskUserQuestion`). This is tool-safe by construction — the coordinator has no `Edit`/`Write`/`Bash`, so the skill's **implement** phase cannot run here and MUST be delegated to a `worker` via `/tdd` (one confirmed item at a time). Stop at the gated CONFIRMED list; never implement in-thread.
@@ -26,9 +27,12 @@ disable-model-invocation: false
 - ❌ Invoke an IMPLEMENTATION skill in the main thread via `Skill` (`/tdd`, `/coverage`, `/architect`, `/code-review`, `/performance`, `/migration`, `/security`, domain validators, etc.). Skills invoked via `Skill` run IN THIS conversation with THIS context and could edit files here — that violates the contract. **Delegate them through `Agent`** so the editing happens in the subagent's session.
 - ❌ Apply its own Kaizen edits directly — it must delegate them to a `worker` (see Kaizen section).
 - ❌ Commit or push without explicit user approval (see Critical Rules below).
+- ❌ Put INTERACTIVE phases (grill-me, validator Gate 3.5, publish y/n) inside a `Workflow` call. The `Workflow` tool runs HEADLESS — it has no `AskUserQuestion` and cannot gate on human input mid-run. The interactive/gated SPINE always remains in the coordinator's foreground session.
+
+> **`Workflow`-dispatched agents are separate sessions**: the agents that a `Workflow` script spawns run in their own isolated sessions (same isolation guarantee as `Agent`). Calling `Workflow` therefore preserves "coordinator never touches files" — the workflow's agents do the actual editing/analysis in their own sessions, exactly like calling `Agent` directly.
 
 ### Why delegation, not main-thread skills
-A `Skill` invocation runs in the **main thread** and inherits this session's tools and context. An `Agent` invocation runs in a **separate session** with its own tools and context window. Only the second guarantees "the coordinator never touches files": the worker subagent does the editing in its own session and returns a result. This is also the **creator/verifier separation** — the agent that writes code is never the agent that validates it.
+A `Skill` invocation runs in the **main thread** and inherits this session's tools and context. An `Agent` invocation runs in a **separate session** with its own tools and context window. A `Workflow` invocation runs a deterministic JS script whose constituent agents each run in their own separate sessions. All three delegation modes guarantee "the coordinator never touches files": the worker subagent (or workflow-agent) does the editing in its own session and returns a result. This is also the **creator/verifier separation** — the agent that writes code is never the agent that validates it.
 
 > If you ever feel the urge to "just make this one edit" — STOP. Dispatch a worker.
 
@@ -177,6 +181,39 @@ Before responding to ANY user message, check:
 
 ---
 
+## 📓 Orchestration Thread Log (ALWAYS — keep the thread)
+
+The coordinator keeps a running, append-only ledger of the orchestration itself at `investigations/<TICKET>/orchestration-log.md` — so the thread survives compaction and any fresh session can resume without re-deriving. It COMPLEMENTS the RPI artifacts (`understanding.md` / `<feature>-design.md` / `findings.md`); it does not replace them.
+
+**The coordinator never writes it itself** (it has no `Edit`/`Write` — see `memory/feedback_coordinator_delegates_all_work`). The log is written by subagents:
+- **Phases with a writing subagent** (a `worker` doing seed / TDD / quality): the worker appends its own structured entry as the LAST step of its task — the dispatch template's RETURN instructs this.
+- **Boundaries with no writing subagent** (read-only `Explore` analysis phases, and every GATE decision — including the read-only `validator` gate): the coordinator dispatches a brief **micro-worker** ("append this entry verbatim to `orchestration-log.md`: …") to record the aggregated outcome. `Explore`/`validator` are read-only and cannot append.
+
+**Cadence**: one entry per PHASE boundary and per GATE — never per micro-action, never a raw tool dump.
+
+**Content bar — clear + concise, but nothing key lost.** Each entry records:
+- the decision(s) made and the one-line WHY (rationale, not narration);
+- the validation contracts when emitted (C1..Cn);
+- per dispatched subagent: the LOAD-BEARING result only (the fact a fresh session needs), not the full output;
+- the gate verdict + the reason it passed/failed;
+- open risks / NEEDS_CONTEXT / the next phase.
+
+Omit: tool-output dumps, restating the prompt, play-by-play. **Test:** *could a brand-new session read only this log and pick up exactly where we are?* If not, it's missing a key fact.
+
+**Entry template** (append-only):
+
+```markdown
+### <Phase / Gate> — <one-line outcome>   (<phase id: 0a / 0b / 1A / 2 / 3.5 / 3 / 4>)
+- Dispatched: <subagent_type + skill> ×N
+- Key results: <load-bearing facts / decisions + one-line why>
+- Gate: PASS | FAIL — <reason>   (omit line if this boundary is not a gate)
+- Open / next: <pending risk · NEEDS_CONTEXT · next phase>
+```
+
+The seeded `orchestration-log.md` opens with a header: ticket, one-line task, the validation contracts (C1..Cn), and an empty ledger that entries append under.
+
+---
+
 ## 🗂️ Step 0: Check Investigations Folder (ALWAYS — Before Any Work)
 
 **BEFORE starting any ticket work** (feature, bug fix, refactor), check if prior research exists:
@@ -204,6 +241,8 @@ Without checking, they would have been re-created from scratch — wasting 2+ ho
 # Worker's first action when investigations/<TICKET>/ is empty:
 mkdir -p investigations/<TICKET>
 cp investigations/_RPI-TEMPLATE.md investigations/<TICKET>/understanding.md
+# → also seed the thread log (see "Orchestration Thread Log" above):
+#   create investigations/<TICKET>/orchestration-log.md with a header (ticket, one-line task, validation contracts, empty ledger). Every phase/gate appends one entry; the coordinator never writes it.
 # → strip to Phase 1, work Research; split Phase 2 into <feature>-design.md; Phase 3 → findings.md
 ```
 
@@ -227,10 +266,17 @@ The **grill-me** contracts (Phase 0a) belong in `validation-contracts.md`; they 
 >
 > **Split-locus skill** = `/receiving-code-review` (inbound PR/bot feedback): its **triage/gate** phase is 🟣 coordinator-direct (read-only + `AskUserQuestion` to clarify ambiguous feedback — a worker can't ask), and its **implement** phase is 🟢 delegated-worker via `/tdd` (the fix edits code). Never run the whole skill in one locus: gate in-thread, then dispatch the confirmed fixes to a worker. Same split pattern as grill-me 🟣 → tdd 🟢.
 
+### Phase 0 — Ideation (coordinator-direct 🟣)
+| Skill | Purpose | Automatic |
+|-------|---------|-----------|
+| `/brainstorm` | Divergent: explore the solution space, decompose, generate 2-3+ approaches, pick a direction | ✅ Only when the spec is *unformed* (WHAT/HOW open) — before grill-me |
+
 ### Phase 0a — Requirements (coordinator-direct 🟣)
 | Skill | Purpose | Automatic |
 |-------|---------|-----------|
 | `/grill-me` | Interrogate user until ambiguity=0; emit validation contracts | ✅ For fuzzy feature/refactor specs (before architect) |
+
+> **`/brainstorm` vs `/grill-me`** — both are coordinator-direct (require `AskUserQuestion`; subagents can't call it). `/brainstorm` is the **divergent** front-end (open options, pick a direction) used only when the spec is *unformed*; its output feeds `/grill-me`, the **convergent** step (kill ambiguity → emit contracts). If the approach is already known, skip straight to `/grill-me`.
 
 ### Meta Skills (Skill maintenance)
 | Skill | Purpose | Automatic |
@@ -272,7 +318,6 @@ The **grill-me** contracts (Phase 0a) belong in `validation-contracts.md`; they 
 | Skill | Purpose | Automatic |
 |-------|---------|-----------|
 | `/memberships` | Membership domain expert | ✅ |
-| `/memberships` | Membership domain expert + validation | ✅ |
 | `/migration` | Database migration safety | ✅ |
 | `/pci-compliance` | PCI-DSS validation | ✅ For payment code |
 | `/gateway-consistency` | Gateway divergence detection | ✅ For payment code |
@@ -317,6 +362,12 @@ The **grill-me** contracts (Phase 0a) belong in `validation-contracts.md`; they 
 │                         MASTER ORCHESTRATION MAP                             │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
+│  PHASE 0: Ideation (unformed specs)   [coordinator-direct: /brainstorm]     │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │   Diverge: decompose → generate 2-3+ approaches → pick a DIRECTION    │   │
+│  │   (only when WHAT/HOW is open; skip straight to 0a if approach known) │   │
+│  └──────────────────────────────┬──────────────────────────────────────┘   │
+│                                 ▼                                           │
 │  PHASE 0a: Grill (fuzzy specs)        [coordinator-direct: /grill-me]       │
 │  ┌─────────────────────────────────────────────────────────────────────┐   │
 │  │   Interrogate user until ambiguity = 0 → emit VALIDATION CONTRACTS    │   │
@@ -409,6 +460,7 @@ The **grill-me** contracts (Phase 0a) belong in `validation-contracts.md`; they 
 ### Must Run Sequentially (Dependencies)
 | First | Then | Reason |
 |-------|------|--------|
+| **brainstorm** | **grill-me** | Diverge + pick a direction before killing ambiguity (only when spec is unformed) |
 | **grill-me** | **architect** | Resolve requirement ambiguity + emit contracts before designing |
 | architect | Phase 1A | Must design before analyzing |
 | Phase 1A | Phase 1B | Static analysis informs domain checks |
@@ -423,11 +475,12 @@ The **grill-me** contracts (Phase 0a) belong in `validation-contracts.md`; they 
 ### Context-Aware Skill Selection
 | If task is... | Coordinator dispatches FIRST... |
 |---------------|---------------------|
-| New feature request (fuzzy spec) | **grill-me (coordinator-direct)** → then architect |
+| **Idea unformed** (WHAT/HOW open; multiple approaches plausible; multi-subsystem request) | **brainstorm (coordinator-direct 🟣)** → then grill-me → architect |
+| New feature request (fuzzy spec, approach known) | **grill-me (coordinator-direct)** → then architect |
 | New feature request (clear spec) | architect (via Agent) |
-| New pack/module | grill-me → architect |
+| New pack/module | brainstorm (if approach open) → grill-me → architect |
 | Major refactor | grill-me → architect |
-| New integration | grill-me → architect |
+| New integration | brainstorm (if approach open) → grill-me → architect |
 | Security fix | security-hardening workflow |
 | Performance issue | performance-optimize workflow |
 | **Review feedback arrives on a PR** (human, Bugbot, CodeRabbit, Greptile) | **receiving-code-review (coordinator-direct 🟣 triage/gate)** → then worker via `/tdd` 🟢 for each confirmed item |
@@ -455,29 +508,38 @@ Every phase is a subagent dispatch via the `Agent` tool. The coordinator compose
 >
 > **Separate context windows**: each subagent runs in its OWN context — it does NOT see this conversation's history, and only its final result returns to the coordinator (intermediate work stays in its window). So every dispatch prompt must be **self-contained** (this is why the template names the skill + pastes the contracts + the Skill Router matches). Caveat that changes how much to spell out: **`worker`/`validator` auto-load `CLAUDE.md` + `CLAUDE.local.md`** (they already have the conventions + Auto-Invoke Table), but **`Explore`/`Plan` skip them** — so an `Explore` prompt must explicitly name the skill/convention to apply.
 
-### Dispatch mode: foreground by default, background on-demand
+### Dispatch mode: three primitives — foreground Agent (spine), background Agent (long workers), Workflow (stateless fan-out)
 
-**Default = foreground.** Dispatch every phase in the foreground. Foreground is already parallel — launch N independent agents as **multiple `Agent` calls in ONE message** and the harness runs them concurrently (e.g. the 4 read-only analysts of Phase 1A). Foreground agents show **inline** in the transcript (`ctrl+o` to expand) and return their result synchronously, which keeps every **gate trivial and reliable** — exactly what a dependency chain (grill → architect → impl → validator → quality) needs.
+**Default = foreground Agent.** Dispatch every phase in the foreground. Foreground is already parallel — launch N independent agents as **multiple `Agent` calls in ONE message** and the harness runs them concurrently (e.g. the 4 read-only analysts of Phase 1A). Foreground agents show **inline** in the transcript (`ctrl+o` to expand) and return their result synchronously, which keeps every **gate trivial and reliable** — exactly what a dependency chain (grill → architect → impl → validator → quality) needs.
 
-**Escalate to background** (`Agent` with `run_in_background: true`, or press `ctrl+b` on a running foreground agent) ONLY when:
+**Escalate to background Agent** (`Agent` with `run_in_background: true`, or press `ctrl+b` on a running foreground agent) ONLY when:
 1. **A worker is expected to be long** (implementing a large slice) — backgrounding frees the session and the job shows in the `~/.claude/jobs/` monitor.
 2. **Fan-out across multiple independent surfaces** (the vertical-slice DAG) — several surface-workers in true parallel that you want to monitor on the dashboard.
 
-Do NOT background the **serial gated phases** (architecture, the worker→validator gate loop, publish): their whole point is to block and gate on the result. Background makes gating async/event-driven (cache cold between wakeups, more fragile) without adding parallelism you don't already have in foreground.
+**Use `Workflow` for STATELESS FAN-OUT phases** (see "Agent vs Workflow: when to use each" below). Phases that are entirely headless and stateless — parallel read-only analysis (Phase 1A/1B), parallel quality checks (Phase 3), and the adversarial find→verify pipeline — can be delegated to a `Workflow` call instead of a manual batch of `Agent` calls. The `Workflow` tool provides deterministic execution, journaled resume on crash, schema-validated structured output, and a concurrency cap. The choice is NOT mandatory — use `Agent` when the number of fan-out agents is small or when you need inline visibility; use `Workflow` when the fan-out is large enough that journaling and structured output have clear payoff.
+
+**NEVER put the interactive/gated SPINE into a Workflow.** The serial/gated phases (grill-me, validator Gate 3.5, publish y/n) are NOT backgrounded and NOT delegated to `Workflow`. Their whole point is to block and gate on human or coordinator judgment in the foreground. `Workflow` runs headless with no `AskUserQuestion` — putting grill-me or the publish gate inside one would silently skip the human check.
 
 > **Visibility note**: foreground subagents are NOT missing — they render inline in the running session (e.g. "Running 4 agents…"). They simply don't appear in the cross-session jobs dashboard unless backgrounded. `ctrl+b` promotes a foreground agent to background on demand.
 
 ### Phase → subagent_type
 
-| Phase | What runs | `subagent_type` | Mode |
-|-------|-----------|-----------------|------|
-| 0a Grill (fuzzy spec) | `/grill-me` interview → validation contracts | **coordinator-direct** (`Skill` + `AskUserQuestion`) | serial, interactive |
-| 0b Architecture | `/architect` design + code location | **`architect`** (opus — planning is the model-quality phase) | serial, **fg** |
-| 1A/1B Analysis | timezone, packwerk, security, graphql, multi-tenancy, pci, gateway, migration | `Explore` (read-only) | **parallel fg** (batch of Agent calls) |
-| 2 Implementation | `/tdd` RED→GREEN→REFACTOR | **`worker`** | serial, **fg** (→ bg only if long / multi-surface fan-out) |
-| 3.5 Validator GATE | `/adversarial-review` or `/code-review` vs contracts | **`validator`** (≠ worker session) | serial, **blocking, fg** |
-| 3 Quality | coverage, pronto, performance, code-simplifier | `worker` (edits) / `Explore` (read-only) | **parallel fg** |
-| 4 Publish | commit → PR (`pbp-code-review:pr-create`) | **`worker`**, only after `y/n` | serial, **fg** |
+| Phase | What runs | `subagent_type` | Model | Mode | Workflow-eligible? |
+|-------|-----------|-----------------|-------|------|--------------------|
+| 0 Ideation (unformed spec) | `/brainstorm` diverge → 2-3+ approaches → pick direction | **coordinator-direct** (`Skill` + `AskUserQuestion`) | session model | serial, interactive | ❌ NO — requires `AskUserQuestion`; headless is impossible |
+| 0a Grill (fuzzy spec) | `/grill-me` interview → validation contracts | **coordinator-direct** (`Skill` + `AskUserQuestion`) | session model | serial, interactive | ❌ NO — requires `AskUserQuestion`; headless is impossible |
+| 0b Architecture | `/architect` design + code location | **`architect`** | opus (pinned — planning is the model-quality phase) | serial, **fg** | ❌ NO — serial, gated on architect output |
+| 1A/1B Analysis | timezone, packwerk, security, graphql, multi-tenancy, pci, gateway, migration | `Explore` (read-only) | pass `model: "sonnet"` (pattern-scan — cheap model suffices) | **parallel fg** (batch of Agent calls) | ✅ YES — fully stateless, headless, no human input; delegate to `Workflow` when fan-out ≥ 4 analysts and structured/journaled output is worthwhile |
+| 2 Implementation | `/tdd` RED→GREEN→REFACTOR | **`worker`** | sonnet (pinned); **escalate** to `model: "opus"` after 2 validator REQUEST CHANGES on the same contract | serial, **fg** (→ bg only if long / multi-surface fan-out) | ❌ NO — serial, gated on Gate 3.5 after it |
+| 3.5 Validator GATE | `/adversarial-review` or `/code-review` vs contracts | **`validator`** (≠ worker session) | fable (pinned — adversarial verification is the highest-leverage model spend) | serial, **blocking, fg** | ❌ NO — blocking gate; coordinator must read the verdict before proceeding |
+| 3 Quality | coverage, pronto, performance, code-simplifier | `worker` (edits) / `Explore` (read-only) | sonnet | **parallel fg** | ✅ YES — stateless, headless, parallel; Workflow provides structured output aggregation and journaled resume across coverage/pronto/performance sub-agents |
+| 4 Publish | commit → PR (`pbp-code-review:pr-create`) | **`worker`**, only after `y/n` | sonnet | serial, **fg** | ❌ NO — gated on explicit user `y/n`; headless is impossible |
+
+> **Adversarial find→verify pipeline** (when `/adversarial-review` runs multiple lenses in parallel): each lens is stateless and headless → ✅ **Workflow-eligible**. Dispatch the lens fan-out via `Workflow`; the coordinator still reads the aggregated verdict before gating.
+>
+> **Skill Router coupling inside Workflow agents**: when the coordinator delegates a fan-out to a `Workflow`, the per-agent prompts written into that workflow script MUST still name the mandatory skills from the CLAUDE.local.md Auto-Invoke Table that match the globs/packs the agent will touch — exactly the same rule that applies to plain `Agent` dispatch prompts. The `Workflow` primitive does not change what skills are required; it only changes how the fan-out is orchestrated.
+
+> **Model routing rule — the model follows the TASK NATURE, not the subagent_type.** Pattern-scanning (grep-level checks: timezone, packwerk, factory-check) → sonnet. Reasoning-heavy work (design, adversarial failure construction, contract verification) → opus/fable. The same `Explore` type therefore runs on sonnet for Phase 1A scans but on opus for `/adversarial-review` lenses (that skill pins `model: "fable"` per lens dispatch). Worker escalation: if the validator returns REQUEST CHANGES twice on the same contract, re-dispatch the worker with `model: "opus"` — a third cheap loop costs more than one expensive pass.
 
 **code-simplifier**: in this delegated model it is **a coordinator-dispatched phase** (`Agent subagent_type="code-simplifier"`) run after the worker / during Quality — NOT something the worker triggers (workers can't spawn subagents). This differs from `shared/code-simplifier-integration.md`, which assumed skills ran in the main thread. Optimize test files after TDD; optimize production code during Quality.
 
@@ -500,11 +562,58 @@ prompt:
     - Validator: you did NOT write this code; try to BREAK it; per contract → PASS/FAIL + evidence.
   RETURN (structured): what you did/found by file · per-contract PASS/FAIL · test/lint/coverage · open risks · STATUS: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT.
     - NEEDS_CONTEXT: subagent hit genuine ambiguity it CANNOT resolve alone (no AskUserQuestion inside a subagent — one level deep). Coordinator answers and re-dispatches rather than the worker guessing.
+    - THREAD LOG: as your FINAL step, append your structured entry (Phase/Gate · dispatched · key results · gate verdict · open/next) to investigations/<TICKET>/orchestration-log.md — clear + concise, load-bearing facts only, no tool dumps. (Read-only Explore/validator agents cannot write; the coordinator dispatches a micro-worker for those boundaries.)
 ```
 
 > **Before composing any prompt**, consult the CLAUDE.local.md **Auto-Invoke Table (Skill Router)** and name every mandatory skill matching the globs/packs the subagent will touch.
 
 <!-- /bitacora skill was removed — skill never existed in this repo; removed from orchestrate 2026-06-10 superpowers-spike pruning pass. -->
+
+---
+
+## Agent vs Workflow: when to use each
+
+Two delegation primitives are available. The hard rule: the interactive/gated SPINE always uses `Agent` (foreground). The stateless fan-out phases may use either, with `Workflow` becoming preferable as fan-out grows.
+
+### Comparison
+
+| Dimension | Model-driven `Agent` | Deterministic `Workflow` |
+|-----------|----------------------|--------------------------|
+| Execution model | Free-form; the agent reasons about what to do | JS script: explicit `phase()`, `agent()`, `parallel()`, loops |
+| Output contract | Free-text result (coordinator parses prose) | Schema-validated structured output |
+| Resume on crash | None — re-dispatch from scratch | Journaled — resumes from last completed phase |
+| Human input mid-run | Supported via `AskUserQuestion` | ❌ IMPOSSIBLE — runs headless |
+| Concurrency cap | You control batch size manually | Built-in concurrency cap in the script |
+| Best for | Any phase; especially interactive/gated ones | Stateless fan-out with many parallel agents |
+
+### HARD RULE — the interactive spine NEVER runs inside a Workflow
+
+The following phases MUST remain in the coordinator's foreground session as plain `Agent` (or `Skill`) calls — never delegated to a `Workflow`:
+
+- **Phase 0a `/grill-me`**: requires `AskUserQuestion` to interrogate the user until ambiguity = 0. Headless execution would silently skip the interview.
+- **Gate 3.5 — Validator**: the coordinator must read the validator's PASS/FAIL verdict synchronously before deciding to loop or advance. A headless pipeline cannot gate on coordinator judgment.
+- **Phase 4 — Publish y/n**: requires explicit user approval before any git operation. A Workflow running headless in the background could never wait for this gate.
+
+Violating this rule means human oversight checks are silently dropped — the most dangerous failure mode for a pure coordinator.
+
+### Criterion for delegating a phase to Workflow
+
+Delegate to `Workflow` when ALL of the following hold:
+1. **Stateless**: the phase has no dependency on real-time coordinator or user input (no `AskUserQuestion` needed within the run).
+2. **Headless**: the agents in the phase are read-only analysts or quality-check workers that produce a result without needing to block for a human decision.
+3. **Fan-out benefit**: the phase launches ≥ 4 independent agents in parallel AND structured/journaled output has a clear payoff (e.g. you want a single schema-validated result object back, or you want automatic resume on crash rather than re-dispatching the whole batch).
+
+If any condition fails, keep the phase as a batch of foreground `Agent` calls — simpler, inline, and equally parallel.
+
+### Phases that meet the criterion (Workflow-eligible)
+
+| Phase | Why eligible |
+|-------|-------------|
+| **1A/1B Analysis** (timezone, packwerk, security, graphql, multi-tenancy, pci, gateway, migration) | Fully stateless + headless read-only analysts; fan-out of 4–8 agents; structured output aggregation is valuable |
+| **3 Quality** (coverage, pronto, performance, code-simplifier) | Parallel quality workers/analysts with no human gate; structured pass/fail aggregation is valuable |
+| **Adversarial find→verify pipeline** (multiple `/adversarial-review` lenses in parallel) | Each lens is stateless and headless; structured verdict aggregation across lenses is exactly what Workflow's schema-validated output was built for |
+
+> **Skill Router coupling is unchanged inside Workflow scripts.** When the coordinator delegates a fan-out to a `Workflow`, the per-agent prompts written into that workflow's JS script MUST still name every mandatory skill from the CLAUDE.local.md Auto-Invoke Table that matches the globs/packs those agents will touch. The `Workflow` primitive changes how the fan-out is orchestrated — it does not change which skills are required.
 
 ---
 
@@ -892,6 +1001,12 @@ Agent subagent_type="Explore"  → "follow /security; Brakeman + OWASP on the di
 
 ## Phase Gates
 
+### Gate 0: Ideation (Phase 0 — unformed specs only)
+The coordinator ran `/brainstorm` to a chosen direction.
+- **Pass**: a single direction is chosen (with rejected alternatives + why), and any multi-subsystem request is decomposed.
+- **Fail**: keep diverging / decomposing; do NOT dispatch grill-me with the option space still open.
+- **Skip**: when the approach is already known — go straight to Gate 0a.
+
 ### Gate 0a: Grill (Phase 0a — fuzzy specs only)
 The coordinator ran `/grill-me` to resolution.
 - **Pass**: ambiguity = 0 AND explicit validation contracts (C1..Cn) emitted and confirmed by the user.
@@ -1022,7 +1137,7 @@ Claude (coordinator):
    C3: the expiry job is idempotent on retry.
 
 ### Phase 0b: Architecture
-[Agent subagent_type="Plan" — design + code location, given C1–C3]
+[Agent subagent_type="architect" — design + code location, given C1–C3]
 → packs/memberships; Service + Sidekiq job. (No files written.)
 
 ### Phase 1A: Static analysis — 4 parallel Agents (Explore, read-only)
@@ -1105,228 +1220,20 @@ Meta-skills (`/kaizen`, `/skill-creator`) are **manual only** - no automatic tri
 4. Confirm the worker reported success.
 
 **Recent Improvements**:
-<!-- Kaizen: 2026-05-25 - Pure-coordinator refactor -->
-- **`/orchestrate` is now a PURE administrative coordinator.** It never edits files or runs mutating commands; ALL work is delegated to subagents via the `Agent` tool (separate sessions). Added the **Coordinator Contract** (MAY/MUST-NEVER) and **Delegation Protocol** (phase→subagent_type + dispatch template) sections.
-- Frontmatter `allowed-tools` stripped of `Bash`/`Edit`/`Task` and the `mcp__serena__*` write wildcard → `[Agent, Read, Grep, Glob, AskUserQuestion, Skill, mcp__serena__(read-only)]`. `Skill` is contract-limited to non-mutating skills (`/grill-me`, `/bitacora`, `/learning`).
-- Created dedicated subagents `.claude/agents/worker.md` (sonnet; Edit/Write/Bash/Skill; follows the named skill + contracts) and `.claude/agents/validator.md` (opus; read-only; adversarial creator/verifier).
-- Wired the two structural additions: **Phase 0a `/grill-me`** (emit validation contracts, coordinator-direct) before architect, and **Gate 3.5 Validator** (blocking, independent agent verifies every contract) between TDD and Quality. Updated Master Dependency Graph, Parallel Execution Rules, Phase Gates, Quality Gate, Example Session, Status Tracking, Best Practices.
-- Runtime facts honored: subagents can't spawn subagents (so `code-simplifier` is a coordinator-dispatched phase, not worker-triggered) and can't use `AskUserQuestion` (so grill-me stays coordinator-direct). `.claude/agents/*` load at session start — restart to pick up new agents.
-- **Dispatch mode decided: foreground by default, background on-demand.** Foreground is already parallel (batch of `Agent` calls) and returns synchronously → gates stay simple/reliable for the dependency chain. Escalate to `run_in_background`/`ctrl+b` only for long workers or multi-surface fan-out (then visible in the `~/.claude/jobs/` dashboard). Never background the serial gated phases. Added a "Dispatch mode" subsection to the Delegation Protocol.
-- ROI: makes "the coordinator never touches code" enforceable by construction (separate sessions) and bakes creator/verifier separation into the flow.
 
-<!-- Kaizen: 2026-01-24 - MCP Integration Update -->
-- Integrated: 7 new MCPs across 10 skills:
-  - `github` → fix-issue, create-pr, commit, code-review, debug
-  - `opensearch` → performance, debug, code-review
-  - `rails` → performance, debug
-  - `playwright` → tdd
-  - `mermaid` → architect, code-review
-  - `stripe` → gateway-test, pci-compliance
-- Added: MCP usage documentation to each integrated skill
-- Total MCPs available: 14 (clickhouse, context7, honeybadger, sentry, github, opensearch, rails, playwright, mermaid, stripe, filesystem, figma, terraform, kubernetes)
+<!-- Older Kaizen history archived to kaizen_log.md -->
 
-<!-- Kaizen: 2026-01-24 - Major Skills Ecosystem Update -->
-- Added: 3 new skills (`/pci-compliance`, `/gateway-consistency`, `/membership-validate`)
-- Updated: Skills count from 21 to 24
-- Split: Phase 1 into Phase 1A (static analysis) and Phase 1B (domain skills)
-- Changed: Domain skills now run in PARALLEL (not sequential)
-- Added: Phase 2.5 for code validation (sidekiq, performance, multi-tenancy)
-- Added: 3 new workflows: `/orchestrate refactor`, `/orchestrate security-hardening`, `/orchestrate performance-optimize`
-- Added: Quality Gate Pattern (common pattern across all workflows)
-- Updated: Context-aware skill selection for payment code
-- Updated: Master Dependency Graph with new phases
+<!-- Kaizen: 2026-06-13 - Adopt the Workflow tool (hybrid) -->
+- What: Adopted the `Workflow` tool in a HYBRID model alongside the existing `Agent`-based delegation. Added `Workflow` to the `allowed-tools` frontmatter. Added a new "Agent vs Workflow: when to use each" section (comparison table, HARD RULE on the interactive spine, and the 3-condition delegation criterion). Added a "Workflow-eligible?" column to the Phase → subagent_type table. Updated the Dispatch mode subsection to name all three primitives: foreground Agent (spine + small fan-out), background Agent (long workers / multi-surface), and Workflow (stateless fan-out). Added `Workflow`-dispatched-agents clarification to the Coordinator Contract (both the MAY list and a new MUST-NEVER bullet for the interactive spine). Added Skill Router coupling note inside the Workflow context.
+- Why: The harness now ships a `Workflow` tool — a deterministic JS-script orchestration primitive with `phase()`, `agent()`, `parallel()`, schema-validated structured output, and journaled resume. For the stateless fan-out phases (Phase 1A/1B analysts, Phase 3 quality checks, adversarial-review lens pipeline) it offers structured aggregation and crash-resume that the manual batch-of-Agent-calls approach lacks. The interactive/gated spine (grill-me, validator Gate 3.5, publish y/n) stays in foreground Agent because Workflow runs headless — silently dropping human-input gates is the most dangerous failure mode for a pure coordinator.
 
-<!-- Kaizen: 2026-01-22 -->
-- Added: `/architect` skill as PHASE 0 (before analysis)
-- Updated: Skills count from 20 to 21
-- Updated: Master Dependency Graph with architect phase
-- Updated: Feature Development workflow with architect step
-- Added: Context-aware selection for when to run architect automatically
+<!-- Kaizen: 2026-06-13 - Add /brainstorm as divergent Phase 0 (ported from obra/superpowers) -->
+- What: Added a new `/brainstorm` skill (`.claude/skills/brainstorm/`) as the **divergent** counterpart to `/grill-me`, and wired it into orchestrate as the optional **Phase 0 — Ideation** (coordinator-direct, before Phase 0a grill). Ported from obra/superpowers' `brainstorming` skill but split to fit this repo's flow: brainstorm (diverge → pick a direction) → grill-me (converge → contracts) → architect (design) → tdd.
+- Why: The ecosystem had only convergent front-ends (grill-me kills ambiguity on a known idea; architect designs a known solution). Nothing generated genuinely distinct options when the WHAT/HOW was still open. /brainstorm fills that gap (decompose multi-subsystem requests, generate 2-3+ approaches via divergence lenses, compare trade-offs, choose).
+- How to apply: Use `/brainstorm` ONLY when the spec is *unformed*; if the approach is known, skip straight to `/grill-me`. It is coordinator-direct (requires AskUserQuestion).
 
-<!-- Kaizen: 2026-01-26 - Meta-Skill Integration -->
-- Added: `/kaizen` meta-skill for continuous improvement
-- Purpose: Systematic skill quality assurance and enhancement
-- Created: New "Meta Skills" category in skill list
-- Added: Workflow 13 - Skill Improvement (Kaizen)
-- Triggers: Automatic (every 10 executions, after failures), manual, scheduled
-- Philosophy: "Sharpen the saw" - skills must evolve with the codebase
-- Updated: Skills count from 24 to 25
-- Integration: kaizen checks can be invoked by orchestrate workflows
-- Next: Implement automatic kaizen triggers in orchestration logic
-
-<!-- Kaizen: 2026-01-28 - MCP Integration Lessons & Stability Focus -->
-**Critical Lessons Learned from MCP Experiment:**
-- **Lesson 1: Prefer Simple Over Complex** - Grep-based validation (instant) > Custom AST tools (timeouts, false negatives)
-- **Lesson 2: Manual Review > Unreliable Automation** - 14% detection rate proved custom MCP tools generated negative ROI (-88%)
-- **Lesson 3: Official MCP Tools are Manual Aids** - Context7, ClickHouse, Honeybadger are MANUAL research tools, not automatic validators
-- **Lesson 4: Never Delete Without Backup** - Catastrophic loss of 160 hours work taught us: always verify understanding before destructive operations
-- **Lesson 5: Validate Before Executing** - rm commands, git operations, and destructive actions require explicit confirmation
-
-**Skills Restored to Stable State:**
-- Removed: All SkillMcpIntegration.rb dependencies (broken custom tools)
-- Removed: lib/skill_mcp_integration.rb, lib/mcp_client_helper.rb (negative ROI)
-- Removed: mcp-tools/ directory (8 custom tools with 86% false negative rate)
-- Restored: Clean skills from `.claude/skills copy/` backup (795 lines vs 1027 broken)
-- Strategy: Use official MCP (Context7, ClickHouse, Honeybadger) MANUALLY for context/research only
-
-**Official MCP Usage (Manual Only):**
-- Context7: Manual docs lookup when encountering unfamiliar APIs/patterns
-- ClickHouse: Manual production data queries for debugging/validation
-- Honeybadger: Manual error investigation for production issues
-- **NEVER**: Automatic batch analysis, automatic validators, or skill dependencies on MCP tools
-
-**New Stability Rules:**
-1. All validators use grep/direct file analysis (instant, reliable)
-2. All skills must work WITHOUT MCP tools (fallback gracefully)
-3. MCP tools are optional research aids, NEVER required dependencies
-4. Before rm/git commands: verify understanding, confirm with user
-5. Complex integrations require backup/commit before changes
-
-**ROI Reality Check:**
-- Custom MCP Tools: -88% ROI (eliminated)
-- Manual Review: +1,700% ROI (baseline strategy)
-- Official MCP (manual): ∞ ROI (free, on-demand, no maintenance)
-
-
-<!-- Kaizen: 2026-01-31 - Code Simplifier Integration Documentation -->
-**What Changed:**
-- Added "Code Simplifier Integration Points" section before Orchestration Workflows
-- Documented 3 integration tiers (ALWAYS, MANDATORY, OPTIONAL)
-- Mapped code-simplifier usage in Feature Development, Bug Fix, and Coverage workflows
-- Added performance impact analysis per tier
-- Created "When code-simplifier Runs" summary table
-
-**Why:**
-- code-simplifier now integrated in 5 skills (tdd, coverage, code-review, performance, factory-check)
-- Orchestrate coordinates workflows → users need to understand when optimization happens
-- Prevent confusion: "Why did my code change?" → Document automatic vs user-triggered
-- Enable informed decisions: Users can choose workflows based on optimization preferences
-
-**Impact:**
-- Workflow transparency: Users know code-simplifier runs 4x in feature workflow, 2x in bugfix
-- Performance expectations: 30-60s overhead, hours saved in test execution
-- Clear tier documentation: ALWAYS (automatic), MANDATORY (included), OPTIONAL (user choice)
-- Integration map shows exactly where in each workflow optimization occurs
-
-**Lessons Learned:**
-- When agents/tools run automatically, MUST document in orchestrate
-- Integration tiers eliminate confusion about automation
-- Workflow diagrams should show optimization points inline
-- Performance impact analysis helps users decide if overhead is worth it
-
-**ROI**: 2.0 (High clarity benefit for users, Medium effort - comprehensive documentation)
-
-<!-- Kaizen: 2026-02-02 - Bitácora Integration -->
-**What Changed:**
-- Added `/bitacora` skill to Meta Skills table
-- Added `/bitacora`, `/log` to explicit_commands for auto-execution
-- Created "Bitácora Integration" section with:
-  - Automatic triggers during workflows (decisions, blockers, learnings)
-  - Integration points in orchestration phases
-  - Manual commands reference
-  - Example entry from workflow
-
-**Why:**
-- Developer traceability: Track technical decisions and their rationale
-- Knowledge capture: Document blockers and how they were resolved
-- Learning retention: Capture insights for future sessions
-- Session continuity: Easy handoff between sessions with documented context
-
-**Integration Points:**
-- PHASE 0 (Architecture): Record DECISION entries for design choices
-- PHASE 1-2 (Analysis + TDD): Record BLOCKER on failures, LEARNING on discoveries
-- PHASE 3 (Quality): Record LEARNING for significant review insights
-- END OF SESSION: Optional daily summary prompt
-
-**Skill Locations:**
-- Skill: `~/.cursor/skills/bitacora/SKILL.md`
-- Entries: `~/.cursor/bitacora/YYYY-MM-DD.md`
-
-**ROI**: 2.5 (High traceability value, personal knowledge base, low overhead)
-
-<!-- Kaizen: 2026-02-19 - investigations/ Folder Convention (CORE-189) -->
-**New convention: `investigations/CORE-[id]/` for local ticket research notes**
-
-- **What**: Each ticket may generate research notes, API exploration scripts, and scratch findings. These live in `investigations/CORE-[id]/` at the repo root.
-- **Exclusion mechanism**: Use `.git/info/exclude` (NOT `.gitignore`).
-  - `.gitignore` is team-wide and committed — don't pollute it with personal folders.
-  - `.git/info/exclude` is local-only (never committed), equivalent to a personal `.gitignore`.
-  - Add entry: `investigations/` to `.git/info/exclude`.
-- **End-of-session prompt**: When wrapping up a feature session, suggest moving any temporary investigation files (e.g., `tmp/test_issue.rb`, API exploration notes) into `investigations/CORE-[id]/` before closing.
-- **Example structure**:
-  ```
-  investigations/
-  └── CORE-189/
-      ├── api_exploration.md      # Manual API call results
-      ├── patch_contacts_notes.md # Findings on Contacts.all filter bug
-      └── tmp_test.rb             # Scratch script used during debugging
-  ```
-- **ROI**: 2.0 (Keeps research findable across sessions without polluting the repo)
-
-<!-- Kaizen: 2026-02-19 - Check investigations/ BEFORE starting work (CORE-189 lesson) -->
-**Critical lesson: Always read `investigations/CORE-[id]/` BEFORE doing ANY research or investigation.**
-
-- **What happened**: CORE-189 session generated a complete Patch CRM reference guide
-  (`patch-integration-reference.md`), QA audit report, and manual test scripts in
-  `investigations/CORE-189/`. Without the habit of checking this folder first, a future
-  session working on Patch would re-research all of it from scratch (2+ hours wasted).
-- **Rule added**: `🗂️ Step 0: Check Investigations Folder` added to orchestrate Smart Detection
-  section — runs before any ticket work starts.
-- **Rule added**: Same step added to `/architect` as "Step 0" before "Step 1: Understand
-  the Requirement".
-- **Command**: `ls investigations/CORE-189/` — zero overhead if empty, huge save if populated.
-- **End-of-session habit**: After completing a ticket, move scratch scripts and notes into
-  `investigations/CORE-[id]/` so the next session finds them immediately.
-- **ROI**: 3.0 (High — prevents hours of re-work, Low effort — one ls command)
-
-<!-- Kaizen: 2026-05-09 - Learning Skill Added -->
-- Added: `/learning` skill — hybrid trigger captures user corrections to auto-memory + skill kaizen sections
-- Why: Each correction was being lost; user had to manually create feedback_*.md files
-- Mechanism: Skill + CLAUDE.local.md rule #15 (no real auto-trigger; depends on model discipline reading CLAUDE.local.md)
-- Limitation: ~90% reliable (vs 100% if hooks were available)
-- Integration: Reads existing memory format (feedback_<topic>.md), writes kaizen entries in standard format
-- Skill mapping: 16 categories of correction topics → relevant skills (default: code-review)
-- ROI: 3.0 (High value — prevents repeat mistakes, Low effort — reuses existing memory infrastructure)
-
-<!-- Kaizen: 2026-05-22 - User correction -->
-- Rule: Respect approved scope before enforcing a destructive step (DELETE/cleanup) — never make one a default/enforced behavior if the ticket marked it out-of-scope. Approval of X (e.g. links) ≠ approval to delete other tables.
-- Why: In CORE-624 I nearly baked faves/user_stats deletion into the engine as an enforced default; the user caught that Erick had scoped those tables out — the exact scope creep (L3) I had criticized in TRIAGE-10.
-- How to apply: Before adding a destructive step as default/enforced, re-read the approval record ("Out of scope / Pendiente / cleanup separado"). If out of scope: leave it out or strictly opt-in pending separate sign-off. Distinguish integrity consequences of an approved action (touch/reindex) from new destructive ops on other tables.
-- Source: User correction on 2026-05-22. See `memory/feedback_respect_approved_scope.md`.
-
-<!-- Kaizen: 2026-05-25 - User correction -->
-- Rule: When a dispatched worker creates extracted/spillover files, they MUST land in a gitignored location if the source was personal/local. NEVER put personal files in `docs/` (committed team docs).
-- Why: Optimizing `CLAUDE.local.md` (gitignored), I had files extracted into `docs/development/` — which is committed. Personal workflow notes would have shipped to the team repo. User: "si son local no deben estar donde es la doc de todo el equipo".
-- How to apply: Before dispatching a worker to create files derived from a personal/local source, instruct it to verify the destination with `git check-ignore <path>`. In this repo: `docs/` = team/committed; `investigations/` and `.claude/` = personal/excluded (`.git/info/exclude`).
-- Source: User correction on 2026-05-25. See `memory/feedback_personal_files_excluded_location.md`.
-
-<!-- Kaizen: 2026-05-26 - Wire RPI template into Step 0 -->
-- **What**: `investigations/_RPI-TEMPLATE.md` (RPI = Research/Plan/Implement, "No Vibes Allowed"/Dex Horthy) existed but was referenced nowhere — used only when remembered. Wired it into **Step 0**: when `investigations/<TICKET>/` is empty, the first worker seeds `understanding.md` from the template (`cp`), and the seeded artifacts map onto existing phases (Research→`/architect`, Plan→`<feature>-design.md`, Implement→`findings.md`). grill-me contracts → `validation-contracts.md`. Also added the RPI scaffold to the CLAUDE.local.md Workflow section (always-on).
-- **Why**: Recent tickets (CORE-526/CORE-220) already used RPI artifacts ad-hoc, but with naming drift (CORE-639 used `root-cause`/`backfill-design` instead of `understanding`/`findings`). No enforcement = inconsistent. User chose "cablear en orchestrate Step 0".
-- **How to apply**: Step 0 worker seeds from template before any code; coordinator only reads. Honors pure-coordinator contract (worker does the `cp`/writes) and the "no personal files in docs/" rule (`investigations/` is gitignored).
-- ROI: 2.0 (consistency + cross-session legibility, near-zero overhead — one `cp`).
-
-<!-- Kaizen: 2026-06-05 - User correction (validator dispatch evidence) -->
-- Rule: When dispatching a `validator`/adversarial agent to verify a conclusion or diff, pass it the RAW evidence (files, diff, original research), not just the coordinator's distilled summary — with attack framing. Conclusion-visibility is fine (creator-verifier design); summary-only injects shared-premise bias so the validator can only contest the thesis, never the coordinator's reading of the facts. For load-bearing decisions, run a BLIND independent pass (fresh agent forms its own verdict from raw inputs, unaware of the coordinator's) as a clean tie-breaker, then reconcile.
-- Why: obra/superpowers spike — 3 adversarial lenses dispatched with the synthesized conclusion but not the two raw research reports; only one partially flagged the narrowed scope. User: "¿deberías pasarle contexto o eso genera sesgo?".
-- How to apply: invariant/fact-checker dispatch → explicit claims (ground-truth blinds anchoring); reasoning/Inverter dispatch → conclusion + attack framing + raw inputs; high-value gate → add a blind-pass tie-breaker agent.
-- Source: User correction on 2026-06-05. See `memory/feedback_review_raw_evidence_not_summary.md`.
-
-<!-- Kaizen: 2026-06-05 - User direction (confirm-loop protocol) -->
-- Rule: When a dispatched validator/adversarial pass returns findings, run a GATED confirm-loop, not a blind one. Per finding: (1) gate on real + in-scope (`git diff develop...HEAD`) + reproducible; (2) route confirmation by type — code→worker reproduces LOCALLY with a failing test; API/lib→Context7; "does it happen in prod / what scale"→ClickHouse (`FINAL` on ReplacingMergeTree + replica-lag guard) or Honeybadger; MCP stays a MANUAL research aid (automated MCP had −88% ROI), ≥2 sources on load-bearing claims; (3) document each CONFIRMED finding in `investigations/<ticket>/findings.md` (gitignored) so the loop survives compaction; (4) terminate on 2 consecutive clean passes or a cap; (5) coordinator autonomy ends at the action gate — commit/push, destructive ops, and outward comms still require explicit user `y/n`.
-- Why: a blind loop amplifies false positives and never terminates; gating + termination + document-confirmed give the "best panorama without waiting for manual" that the user wants, safely.
-- Source: User direction on 2026-06-05. See `memory/feedback_confirm_loop_adversarial_findings.md`.
-
-<!-- kaizen 2026-06-09: "implement the plan" = classify by executor first -->
-When the user says "implement the plan / do it" over a plan, run a CLASSIFICATION pass before any coding: tag each item {me-now / user-interactive-action / external-sign-off-gated / no-op}. Adoption/meta/strategy plans often have little-to-no code-for-me — do only the me-now subset (gitignored prep), hand the user their commands, DRAFT (never auto-send/commit) gated items, and name no-ops as done-by-decision. Do not fabricate busywork or cross a sign-off/commit/destructive gate. See memory feedback_implement_plan_classify_by_executor.
-
-<!-- Kaizen: 2026-06-09 — Worker STATUS enum + NEEDS_CONTEXT handling (adapted from obra/superpowers, MIT) -->
-- Added STATUS enum (`DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT`) to the reusable dispatch template RETURN line.
-- Rule: a subagent that hits genuine ambiguity returns NEEDS_CONTEXT — it CANNOT call AskUserQuestion (one level deep). The coordinator fields the question and re-dispatches with the answer rather than letting the worker guess.
-- Why: without a typed status the coordinator had to parse free-text prose to detect stalls; NEEDS_CONTEXT makes the escalation path explicit and prevents workers from making up answers to unresolvable ambiguity.
-
-<!-- Kaizen: 2026-06-10 — Purge stale tool/skill references (superpowers-spike 2026-06-10 drift findings) -->
-- Removed: `/bitacora` from allowed skills (Coordinator Contract, explicit_commands, execution locus note, Meta Skills table) — skill never existed in this repo; the entire "Bitácora Integration" section collapsed to a one-line tombstone note. Historical Kaizen log entries preserved.
-- Reduced: "Serena MCP" subsection from a 7-line "currently available" description to a one-liner tombstone noting removal date and backup path. Removed Serena references from the ast-grep paragraph.
-- Updated: `/membership-validate` → `/memberships` in Domain Skills table, Phase 1B diagram, parallel rules table, context-aware selection table (skill was merged into `/memberships` 2026-06-10).
-- Lesson: stale tool/skill references in the coordinator prompt mislead dispatch decisions — a skill listed as "available" that doesn't exist causes wasted agent cycles on a false dependency. Prune on every superpowers-spike pass.
+<!-- Kaizen: 2026-06-13 - User direction (orchestration thread log) -->
+- Rule: the coordinator keeps a running append-only ledger at `investigations/<TICKET>/orchestration-log.md`, updated at every phase boundary and gate (not micro-actions). Complements the RPI artifacts. Clear + concise but enough that a compacted/fresh session resumes from the log alone (resume-from-log test).
+- Mechanism: each phase-worker appends its own structured entry; for read-only Explore phases and gate decisions (incl. the read-only validator), the coordinator dispatches a micro-worker to append. Coordinator never writes it (see `memory/feedback_coordinator_delegates_all_work`).
+- Added: "📓 Orchestration Thread Log" section + entry template; Step 0 seeds the log; the dispatch-template RETURN tells workers to append their entry.
+- Source: User direction on 2026-06-13. See `memory/feedback_orchestrator_thread_log.md`.
