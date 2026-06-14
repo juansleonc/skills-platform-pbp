@@ -39,15 +39,19 @@ Every skill should be:
 
 ## When to Use
 
-### Automatic Triggers
-- **After 2+ skill failures** in same session (orchestrator queues for kaizen)
-- **Every 10 skill executions** (periodic health check)
-- **After major changes** (Rails upgrade, new patterns, MCP tools)
-- **Weekly scheduled audit** (if enabled)
+### Heuristics for WHEN to invoke manually
 
-### Manual Triggers
+**No automatic mechanism exists; this skill is manual-only.** (CLAUDE.local.md lists `/kaizen` under "Meta-Skills (Manual Only — Zero Overhead, sin triggers automáticos)"; frontmatter has `disable-model-invocation: true`.) The bullets below are signals a human should watch for, not automated triggers:
+
+- A skill has failed 2+ times in the same session
+- A skill has not been improved in 90+ days
+- After a major change (Rails upgrade, new patterns, MCP tools added/removed)
+- After user feedback that a skill produced wrong or misleading output
+- Periodic ecosystem health check (monthly/quarterly cadence if desired)
+
+### Manual Invocation
 ```bash
-/kaizen                    # Full ecosystem audit (all 25 skills)
+/kaizen                    # Full ecosystem audit
 /kaizen <skill-name>       # Improve specific skill
 /kaizen report             # Generate improvement metrics
 /kaizen suggest            # Suggest improvements based on recent sessions
@@ -270,10 +274,10 @@ Code examples become stale. Verify and update:
 
 ```bash
 # Find potentially outdated examples
-grep -r "Time\.now" .claude/skills/*/skill.md
-grep -r "\.to_s(:db)" .claude/skills/*/skill.md
-grep -r "allow_any_instance_of" .claude/skills/*/skill.md
-grep -r "bundle exec" .claude/skills/*/skill.md | grep -v "docker\|make\|bin/d"
+grep -r "Time\.now" .claude/skills/*/SKILL.md
+grep -r "\.to_s(:db)" .claude/skills/*/SKILL.md
+grep -r "allow_any_instance_of" .claude/skills/*/SKILL.md
+grep -r "bundle exec" .claude/skills/*/SKILL.md | grep -v "docker\|make\|bin/d"
 ```
 
 ### Pattern 4: Add Integration Points
@@ -352,7 +356,7 @@ Example:
 ### Validate YAML Frontmatter
 ```bash
 # Check each skill has valid YAML
-for skill in .claude/skills/*/skill.md; do
+for skill in .claude/skills/*/SKILL.md; do
   echo "Checking: $skill"
   head -10 "$skill" | grep -E "^(name|description|allowed-tools):" || echo "❌ Invalid YAML"
 done
@@ -361,12 +365,12 @@ done
 ### Check for Outdated Patterns
 ```bash
 # Forbidden patterns
-grep -r "Time\.now" .claude/skills/*/skill.md
-grep -r "allow_any_instance_of" .claude/skills/*/skill.md
-grep -r "\.to_s(:db)" .claude/skills/*/skill.md
+grep -r "Time\.now" .claude/skills/*/SKILL.md
+grep -r "allow_any_instance_of" .claude/skills/*/SKILL.md
+grep -r "\.to_s(:db)" .claude/skills/*/SKILL.md
 
 # Docker violations
-grep -r "bundle exec" .claude/skills/*/skill.md | grep -v "docker\|make\|bin/d"
+grep -r "bundle exec" .claude/skills/*/SKILL.md | grep -v "docker\|make\|bin/d"
 ```
 
 ### Validate Shared References
@@ -375,7 +379,7 @@ grep -r "bundle exec" .claude/skills/*/skill.md | grep -v "docker\|make\|bin/d"
 
 ```bash
 # Check for broken shared doc references
-for skill in .claude/skills/*/skill.md; do
+for skill in .claude/skills/*/SKILL.md; do
   skill_name=$(basename $(dirname "$skill"))
   grep -n '](../shared/' "$skill" 2>/dev/null | while IFS=: read linenum line; do
     ref=$(echo "$line" | sed 's/.*](\.\.\/\.\.\/shared\///' | sed 's/).*//' | sed 's/#.*//')
@@ -405,273 +409,31 @@ done
 ### Check Tool References
 ```bash
 # Find all tool references
-grep -r "mcp__" .claude/skills/*/skill.md | cut -d: -f2 | sort -u
+grep -r "mcp__" .claude/skills/*/SKILL.md | cut -d: -f2 | sort -u
 
 # Verify tools exist (check against available MCPs)
 ```
 
 ## Kaizen Workflows
 
-### Workflow 1: Full Ecosystem Audit
+Four invocation modes; each follows the 6-phase cycle above but with a different scope:
 
-```
-/kaizen
+| Command | Scope | Phases used | Key output |
+|---------|-------|-------------|------------|
+| `/kaizen` | Full ecosystem audit | All 6 | Priority matrix → top 5 → propose → implement → report |
+| `/kaizen <skill>` | Single skill | All 6 | Audit checklist → ROI proposals → approval → edit → kaizen_log.md entry |
+| `/kaizen metrics` | Read-only health report | 1–2 only | Skill health table (last kaizen, issues, status) |
+| `/kaizen suggest` | Suggest next targets | 1–2 only | Ranked shortlist of improvement candidates |
 
-┌─ PHASE 1: Inventory (ALL skills) ─────────────────┐
-│  List all 25 skills with:                         │
-│  ├── Last modified date                           │
-│  ├── Lines of content                             │
-│  ├── Number of kaizen entries                     │
-│  ├── Number of dependencies                       │
-│  └── Known issues count                           │
-└───────────────────────────────────────────────────┘
-                        ▼
-┌─ PHASE 2: Priority Matrix ────────────────────────┐
-│  Score each skill by:                             │
-│  ├── Usage frequency (High/Med/Low)               │
-│  ├── Complexity (High/Med/Low)                    │
-│  ├── Last improvement date (days ago)             │
-│  └── Known issues count                           │
-│                                                    │
-│  Priority = (Usage × Complexity × Days) / 100     │
-│  Sort by priority (highest first)                 │
-└───────────────────────────────────────────────────┘
-                        ▼
-┌─ PHASE 3: Audit Top 5 ────────────────────────────┐
-│  For each of top 5 priority skills:               │
-│  ├── Read skill.md thoroughly                     │
-│  ├── Run audit checklist                          │
-│  ├── Identify improvement opportunities           │
-│  ├── Calculate ROI for each improvement           │
-│  └── Propose changes sorted by ROI                │
-└───────────────────────────────────────────────────┘
-                        ▼
-┌─ PHASE 4: User Review ────────────────────────────┐
-│  Present findings:                                │
-│  ├── Top 5 skills needing improvement             │
-│  ├── Issues found (Critical/High/Medium/Low)      │
-│  ├── Proposed changes with ROI scores             │
-│  └── Recommended order of improvements            │
-│                                                    │
-│  Ask: "Which skill should I improve first?"       │
-└───────────────────────────────────────────────────┘
-                        ▼
-┌─ PHASE 5: Implement (One skill at a time) ────────┐
-│  For selected skill:                              │
-│  ├── Apply improvements to skill.md               │
-│  ├── Update dependencies in orchestrator          │
-│  ├── Validate with dry-run                        │
-│  ├── Document in kaizen_log.md                    │
-│  └── Generate improvement report                  │
-└───────────────────────────────────────────────────┘
-                        ▼
-┌─ PHASE 6: Report ─────────────────────────────────┐
-│  Generate improvement summary:                    │
-│  ├── Changes made                                 │
-│  ├── Expected benefits                            │
-│  ├── Before/after metrics                         │
-│  ├── Remaining opportunities                      │
-│  └── Next recommended skill                       │
-└───────────────────────────────────────────────────┘
-```
+**Workflow steps by mode:**
 
-### Workflow 2: Single Skill Improvement
+`/kaizen` (full audit): Inventory all skills with `ls .claude/skills/ | grep -v -E 'CLAUDE|shared' | wc -l` → score each by (Usage × Complexity × Days)/100 → audit top 5 → present findings → implement one at a time with approval → report.
 
-```
-/kaizen <skill-name>
+`/kaizen <skill>`: Read skill completely → run audit checklist → score issues by ROI (Impact/Effort) → show top-5 proposals → get approval → apply edits → validate YAML/tools/refs → update `kaizen_log.md` → suggest next skill.
 
-┌─ PHASE 1: Observe & Read ─────────────────────────┐
-│  ├── Read skill.md completely                     │
-│  ├── Understand purpose and workflow              │
-│  ├── Note dependencies                            │
-│  ├── Review kaizen history                        │
-│  └── Check recent failure patterns                │
-└───────────────────────────────────────────────────┘
-                        ▼
-┌─ PHASE 2: Analyze (Run Checklist) ────────────────┐
-│  ✓ Critical: YAML valid, tools exist              │
-│  ✓ High: Clear purpose, no outdated patterns      │
-│  ✓ Medium: Examples present, workflow efficient   │
-│  ✓ Low: Kaizen entries, related skills            │
-│                                                    │
-│  Find issues in 5 categories:                     │
-│  ├── Clarity issues                               │
-│  ├── Efficiency problems                          │
-│  ├── Reliability gaps                             │
-│  ├── Validation missing                           │
-│  └── Maintainability concerns                     │
-└───────────────────────────────────────────────────┘
-                        ▼
-┌─ PHASE 3: Design (Prioritize by ROI) ─────────────┐
-│  For each issue found:                            │
-│  ├── Estimate Impact (High=3, Med=2, Low=1)       │
-│  ├── Estimate Effort (Low=3, Med=2, High=1)       │
-│  ├── Calculate ROI = Impact / Effort              │
-│  └── Sort by ROI (highest first)                  │
-│                                                    │
-│  Recommend: Apply improvements with ROI ≥ 1.0     │
-└───────────────────────────────────────────────────┘
-                        ▼
-┌─ PHASE 4: Implement (Get Approval) ───────────────┐
-│  Show proposed changes (top 5 by ROI)             │
-│  For each:                                        │
-│  ├── Current state (quote from skill.md)          │
-│  ├── Problem description                          │
-│  ├── Proposed solution                            │
-│  ├── Expected benefit                             │
-│  └── ROI score                                    │
-│                                                    │
-│  Ask: "Approve these improvements? (y/n)"         │
-│  If approved → Apply changes with Edit tool       │
-└───────────────────────────────────────────────────┘
-                        ▼
-┌─ PHASE 5: Validate ───────────────────────────────┐
-│  ├── Validate YAML frontmatter                    │
-│  ├── Check tool references                        │
-│  ├── Verify markdown structure                    │
-│  ├── Dry-run skill (if possible)                  │
-│  ├── Verify instructions clearer                  │
-│  └── Check no unintended side effects             │
-└───────────────────────────────────────────────────┘
-                        ▼
-┌─ PHASE 6: Reflect & Document ─────────────────────┐
-│  ├── Update kaizen_log.md with session            │
-│  ├── Add kaizen entry to skill.md                 │
-│  ├── Update skill health metrics                  │
-│  ├── Generate before/after comparison             │
-│  └── Suggest next skill for improvement           │
-└───────────────────────────────────────────────────┘
-                        ▼
-┌─ OUTPUT: Improvement Report ──────────────────────┐
-│  ## Kaizen Report: <skill-name> - YYYY-MM-DD      │
-│                                                    │
-│  ### Summary                                      │
-│  - Issues found: X                                │
-│  - Changes applied: Y (ROI ≥ 1.0)                 │
-│  - Skipped: Z (ROI < 1.0)                         │
-│                                                    │
-│  ### Before/After Metrics                         │
-│  | Metric | Before | After | Change |             │
-│  |--------|--------|-------|--------|             │
-│  | ...    | ...    | ...   | ...    |             │
-│                                                    │
-│  ### Changes Applied                              │
-│  1. ✅ Type: Description (ROI: X)                 │
-│     - Before: ...                                 │
-│     - After: ...                                  │
-│     - Benefit: ...                                │
-│                                                    │
-│  ### Lessons Learned                              │
-│  - Key takeaway 1                                 │
-│  - Key takeaway 2                                 │
-└───────────────────────────────────────────────────┘
-```
+`/kaizen metrics`: Gather per-skill stats (total entries, last date, issue count) → produce health table with status (Healthy / Review / Action Required).
 
-### Workflow 3: Generate Metrics Report
-
-```
-/kaizen metrics
-
-┌─ PHASE 1: Gather Stats ───────────────────────────┐
-│  For all 25 skills:                               │
-│  ├── Count total kaizen improvements              │
-│  ├── Find most/least improved skills              │
-│  ├── Calculate avg improvement frequency          │
-│  ├── Identify skills needing attention            │
-│  └── Track failure rates (if available)           │
-└───────────────────────────────────────────────────┘
-                        ▼
-┌─ PHASE 2: Analyze Trends ─────────────────────────┐
-│  ├── Which improvement types most common?         │
-│  ├── Which skills improved most?                  │
-│  ├── What patterns emerge?                        │
-│  ├── Which skills haven't been touched?           │
-│  └── Are improvements effective?                  │
-└───────────────────────────────────────────────────┘
-                        ▼
-┌─ PHASE 3: Generate Report ────────────────────────┐
-│  ## Skill Health Report - YYYY-MM-DD              │
-│                                                    │
-│  ### Overall Stats                                │
-│  - Total skills: 25                               │
-│  - Total improvements: XX                         │
-│  - Avg improvements per skill: X.X                │
-│  - Last 30 days: XX improvements                  │
-│                                                    │
-│  ### Skills by Health Status                      │
-│  | Skill | Last Kaizen | Issues | Status |        │
-│  |-------|-------------|--------|--------|        │
-│  | tdd | 15d | 0 | ✅ Healthy |                   │
-│  | coverage | 45d | 1 | ⚠️ Review |               │
-│  | timezone | 90d | 2 | 🔴 Action Required |      │
-│                                                    │
-│  ### Top Improved Skills                          │
-│  1. security (5 improvements, -80% failures)      │
-│  2. tdd (4 improvements, -33% time)               │
-│                                                    │
-│  ### Skills Needing Attention                     │
-│  1. timezone (last improved: 90 days ago)         │
-│  2. gateway-test (never improved)                 │
-│                                                    │
-│  ### Common Improvement Types                     │
-│  - Clarity: 35%                                   │
-│  - Efficiency: 25%                                │
-│  - Reliability: 20%                               │
-│  - Validation: 15%                                │
-│  - Maintainability: 5%                            │
-│                                                    │
-│  ### Recommendations                              │
-│  - Next 3 skills to improve: ...                  │
-│  - Patterns to propagate: ...                     │
-│  - Shared docs to create: ...                     │
-└───────────────────────────────────────────────────┘
-```
-
-### Workflow 4: Suggest Improvements
-
-```
-/kaizen suggest
-
-┌─ PHASE 1: Analyze Recent Sessions ────────────────┐
-│  ├── Review last 10 skill executions              │
-│  ├── Identify patterns in failures                │
-│  ├── Note repeated issues                         │
-│  └── Find skills used together                    │
-└───────────────────────────────────────────────────┘
-                        ▼
-┌─ PHASE 2: Cross-Reference Patterns ───────────────┐
-│  ├── Compare with kaizen_log.md                   │
-│  ├── Find similar issues in other skills          │
-│  ├── Identify ecosystem-wide patterns             │
-│  └── Check for missed opportunities               │
-└───────────────────────────────────────────────────┘
-                        ▼
-┌─ PHASE 3: Generate Suggestions ───────────────────┐
-│  ## Kaizen Suggestions - YYYY-MM-DD               │
-│                                                    │
-│  Based on recent usage, I suggest:                │
-│                                                    │
-│  ### High Priority (Do Now)                       │
-│  1. **security**: Failed 3 times this week        │
-│     - Issue: Timeout on large codebases           │
-│     - Fix: Add timeout handling + --fast fallback │
-│     - Estimated ROI: 3.0 (High impact, low effort)│
-│                                                    │
-│  ### Medium Priority (This Week)                  │
-│  2. **coverage**: Confusing output format         │
-│     - Issue: Users ask "what does 95% mean?"      │
-│     - Fix: Show uncovered lines explicitly        │
-│     - Estimated ROI: 2.0                          │
-│                                                    │
-│  ### Ecosystem-Wide Pattern                       │
-│  3. **All skills**: Docker command inconsistency  │
-│     - Pattern: Some use make, some use bin/d      │
-│     - Fix: Standardize on bin/d in examples       │
-│     - Skills affected: 8                          │
-│                                                    │
-│  Would you like me to run /kaizen security?       │
-└───────────────────────────────────────────────────┘
-```
+`/kaizen suggest`: Review recent session failures/patterns → cross-reference `kaizen_log.md` → emit ranked shortlist with estimated ROI.
 
 ## Integration with Orchestrator
 
@@ -688,10 +450,9 @@ If skill X fails 2+ times in session:
 
 ### 2. Periodic Reviews
 ```
-Every 10 skill executions:
-  1. Generate /kaizen suggest automatically
-  2. Show top 3 improvement opportunities
-  3. Ask: "Run kaizen on any of these skills?"
+Heuristic (manual): after roughly 10 skill executions in a session,
+consider running /kaizen suggest to surface improvement opportunities.
+No automatic trigger exists — this is a signal for human judgment.
 ```
 
 ### 3. After Successful Workflows
@@ -725,29 +486,6 @@ All improvements tracked in `.claude/skills/kaizen/kaizen_log.md`:
 ### Lessons Learned
 - Key takeaway that applies to other skills
 - Pattern that could be propagated
-```
-
-## Kaizen Backlog
-
-Track future improvements:
-
-```markdown
-## Kaizen Backlog
-
-### High Priority
-- [ ] Create shared/skill-writing-guide.md template
-- [ ] Add automated YAML validation to CI
-- [ ] Consolidate Docker command examples across all skills
-
-### Medium Priority
-- [ ] Add skill usage metrics tracking
-- [ ] Create skill dependency graph visualization
-- [ ] Document skill execution patterns
-
-### Low Priority
-- [ ] Add skill effectiveness scoring system
-- [ ] Create skill changelog automation
-- [ ] Build skill search/discovery tool
 ```
 
 ## Success Criteria
@@ -831,12 +569,12 @@ make test TEST_PATH=spec/models/user_spec.rb
 
 ## Maintenance Schedule
 
-### Proactive (Recommended)
+### Proactive (Recommended — all manual)
 ```
-Every 10 executions: /kaizen suggest (automatic)
-Monthly:             /kaizen report (ecosystem health check)
-Quarterly:           Improve top 3 priority skills
-Yearly:              Full audit of all 25 skills
+~Every 10 executions: /kaizen suggest (manual heuristic, no auto-trigger)
+Monthly:              /kaizen report (ecosystem health check)
+Quarterly:            Improve top 3 priority skills
+Yearly:               Full audit of all skills (count dynamically: `ls .claude/skills/ | grep -v -E 'CLAUDE|shared' | wc -l`)
 ```
 
 ### Reactive (As Needed)
@@ -913,32 +651,4 @@ Skills are living documentation. They must evolve with the project, patterns, an
 
 > "Even the kaizen skill must practice kaizen."
 
-<!-- Kaizen: 2026-01-26 - Consolidated Edition -->
-- Created: Consolidated version combining platform and platform2
-- Combined: 6-phase process + audit checklist + 5 improvement patterns
-- Added: ROI calculation + priority formulas + validation commands
-- Integrated: All workflows (audit, improve, metrics, suggest)
-- Documentation: Merged quick_reference, implementation, examples into main skill
-- Purpose: Single comprehensive kaizen skill for both platforms
-- Next: Apply to both platform and platform2
-
-<!-- Kaizen: 2026-02-01 - Shared Documentation Validation -->
-- Added: "All shared doc references resolve" to Critical Priority checklist
-- Improved: "Validate Shared References" section with comprehensive validation script
-- Why: 7 broken references to mcp-tools-guide.md (removed), preventing ecosystem trust
-- Impact: Future kaizen sessions will catch broken references early
-- Validation: Automated script checks all skills for broken ../shared/*.md links
-- ROI: 1.8 (High impact - prevents broken refs, Low effort - automated check)
-
-<!-- Kaizen: 2026-06-09 - CSO description-lint added to audit checklist -->
-- Added (High Priority checklist): "description: states triggers only — no workflow/phase/step summary" (cross-refs skill-creator's CSO Rule section).
-- Why: the CSO rule lived only in skill-creator, firing only when authoring NEW skills; the existing corpus (orchestrate, adversarial-review, architect, code-review) was never linted against it. Putting it in the kaizen audit makes it enforceable ecosystem-wide.
-- ROI: 3.0 (High impact; Low effort — one checklist line).
-
-<!-- Kaizen: 2026-06-10 — Behavior-Test Eval + Prune Counterpart -->
-Added "Behavior-Test Eval" section and "Prune Counterpart" note to the audit/improvement workflow.
-- Source: obra/superpowers writing-skills + testing-skills-with-subagents.md (MIT, commit 6fd4507).
-- Trigger: spike (investigations/superpowers-spike/findings.md, 2026-06-10) found 50/50 local skills never behavior-tested; real defects shipped (fabricated file:line citations in multi-tenancy/SKILL.md; CSO violation in tdd frontmatter). Deferred-until-observed trigger condition fired.
-- What was added: RED/GREEN/pressure eval loop for existing skills (Agent-tool dispatch); explicit rule that if agent complies WITHOUT the skill, the section is redundant; prune counterpart (deletion mechanism for growth ratchet); cross-reference to skill-creator's canonical protocol (no duplication).
-- What was NOT ported: persuasion-principles/Cialdini framing, EXTREMELY_IMPORTANT wrappers, SessionStart hook, CLI harness — conflicts with low-friction philosophy (memory: feedback_no_redundant_verification_hooks).
-- ROI: 3.0 (High impact — catches behavior-invisible defects; Low effort — eval is Agent dispatch, ~5 min per section).
+<!-- Improvement history archived to kaizen_log.md (2026-06-14). Entries: 2026-01-26 Consolidated Edition · 2026-02-01 Shared Doc Validation · 2026-06-09 CSO description-lint · 2026-06-10 Manual-only hygiene · 2026-06-10 Behavior-Test Eval -->

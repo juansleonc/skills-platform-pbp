@@ -1231,3 +1231,45 @@ This kaizen session successfully enhanced the security skill from "comprehensive
 - Average ROI: 2.5 (mechanical edits, high ecosystem-wide impact)
 - Skills touched: tdd, kaizen, qa-audit, skill-creator, orchestrate, adversarial-review, architect, code-review, coverage, rails-audit, action-policy, multi-tenancy, packwerk, performance
 
+---
+
+## Archived SKILL.md inline entries (moved 2026-06-14)
+
+<!-- Kaizen: 2026-01-26 - Consolidated Edition -->
+- Created: Consolidated version combining platform and platform2
+- Combined: 6-phase process + audit checklist + 5 improvement patterns
+- Added: ROI calculation + priority formulas + validation commands
+- Integrated: All workflows (audit, improve, metrics, suggest)
+- Documentation: Merged quick_reference, implementation, examples into main skill
+- Purpose: Single comprehensive kaizen skill for both platforms
+- Next: Apply to both platform and platform2
+
+<!-- Kaizen: 2026-02-01 - Shared Documentation Validation -->
+- Added: "All shared doc references resolve" to Critical Priority checklist
+- Improved: "Validate Shared References" section with comprehensive validation script
+- Why: 7 broken references to mcp-tools-guide.md (removed), preventing ecosystem trust
+- Impact: Future kaizen sessions will catch broken references early
+- Validation: Automated script checks all skills for broken ../shared/*.md links
+- ROI: 1.8 (High impact - prevents broken refs, Low effort - automated check)
+
+<!-- Kaizen: 2026-06-09 - CSO description-lint added to audit checklist -->
+- Added (High Priority checklist): "description: states triggers only — no workflow/phase/step summary" (cross-refs skill-creator's CSO Rule section).
+- Why: the CSO rule lived only in skill-creator, firing only when authoring NEW skills; the existing corpus (orchestrate, adversarial-review, architect, code-review) was never linted against it. Putting it in the kaizen audit makes it enforceable ecosystem-wide.
+- ROI: 3.0 (High impact; Low effort — one checklist line).
+
+<!-- Kaizen: 2026-06-10 - Manual-only + dynamic skill count (Fable audit Tier 3) -->
+- Demoted "Automatic Triggers" subsection to "Heuristics for WHEN to invoke manually": same bullets reframed as human signals to watch for; added explicit line "No automatic mechanism exists; this skill is manual-only." (aligns with frontmatter `disable-model-invocation: true` and CLAUDE.local.md Meta-Skills note).
+- Replaced all 4 hardcoded "25 skills" occurrences with the dynamic command `ls .claude/skills/ | grep -v -E 'CLAUDE|shared' | wc -l` so counts stay accurate as skills are added/removed.
+
+<!-- Kaizen: 2026-06-10 - Casing + auto-language hygiene (Fable re-audit hygiene pass) -->
+- Fixed: all shell glob patterns changed from `.claude/skills/*/skill.md` to `.claude/skills/*/SKILL.md` (lowercase was silently empty on Linux case-sensitive filesystems). Affected: Validate YAML, Check Outdated Patterns, Validate Shared References, Check Tool References, and Pattern 3 code blocks.
+- Fixed: "Integration with Orchestrator" § 2 rewrote "Every 10 skill executions: Generate /kaizen suggest automatically" to a manual heuristic; "Maintenance Schedule" heading annotated "(all manual)". Both contradicted `disable-model-invocation: true` and the CLAUDE.local.md Meta-Skills note.
+
+<!-- Kaizen: 2026-06-10 - Behavior-Test Eval + Prune Counterpart -->
+Added "Behavior-Test Eval" section and "Prune Counterpart" note to the audit/improvement workflow.
+- Source: obra/superpowers writing-skills + testing-skills-with-subagents.md (MIT, commit 6fd4507).
+- Trigger: spike (investigations/superpowers-spike/findings.md, 2026-06-10) found 50/50 local skills never behavior-tested; real defects shipped (fabricated file:line citations in multi-tenancy/SKILL.md; CSO violation in tdd frontmatter). Deferred-until-observed trigger condition fired.
+- What was added: RED/GREEN/pressure eval loop for existing skills (Agent-tool dispatch); explicit rule that if agent complies WITHOUT the skill, the section is redundant; prune counterpart (deletion mechanism for growth ratchet); cross-reference to skill-creator's canonical protocol (no duplication).
+- What was NOT ported: persuasion-principles/Cialdini framing, EXTREMELY_IMPORTANT wrappers, SessionStart hook, CLI harness — conflicts with low-friction philosophy (memory: feedback_no_redundant_verification_hooks).
+- ROI: 3.0 (High impact — catches behavior-invisible defects; Low effort — eval is Agent dispatch, ~5 min per section).
+
