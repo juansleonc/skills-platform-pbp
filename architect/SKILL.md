@@ -1,7 +1,7 @@
 ---
 name: architect
 description: Use when designing a new feature, pack, service, schema, or integration before implementation begins.
-allowed-tools: [Bash, Read, Grep, Glob, Agent, mcp__context7__resolve-library-id, mcp__context7__query-docs, mcp__clickhouse__run_select_query, mcp__clickhouse__list_tables, mcp__clickhouse__list_databases, mcp__mermaid__*, mcp__ide__executeCode, mcp__ide__getDiagnostics]
+allowed-tools: [Bash, Read, Grep, Glob, Agent, mcp__context7__resolve-library-id, mcp__context7__query-docs, mcp__clickhouse__run_query, mcp__clickhouse__list_tables, mcp__clickhouse__list_databases]
 disable-model-invocation: false
 ---
 
@@ -236,11 +236,11 @@ Agent tool:
 
 ```ruby
 # ✅ PRIMARY METHOD: Use MCP ClickHouse tool
-mcp__clickhouse__run_select_query:
+mcp__clickhouse__run_query:
   query: "SELECT count(*) as total_rows FROM pbp_productionDB_optimized.<table>"
 
 # Available MCP Data Tools:
-# - mcp__clickhouse__run_select_query - Execute production queries
+# - mcp__clickhouse__run_query - Execute production queries
 # - mcp__clickhouse__list_databases - List available databases
 # - mcp__clickhouse__list_tables - List tables with schema
 # - mcp__honeybadger__* - Error tracking and fault analysis
@@ -306,11 +306,11 @@ FROM pbp_productionDB_optimized.<table>
 **MANDATORY for new gems/frameworks**: If the task introduces a gem not yet used in the codebase, ALWAYS query Context7 before designing. This catches naming conventions, recommended patterns, and common pitfalls early.
 
 ```
-# Example: Adding Pundit authorization
+# Example: Adding action_policy authorization (this project uses action_policy, NOT Pundit)
 mcp__context7__resolve-library-id:
-  libraryName: "pundit"
+  libraryName: "action_policy"
 mcp__context7__query-docs:
-  libraryId: "/varvet/pundit"
+  libraryId: "/palkan/action_policy"
   query: "setup best practices controller integration naming"
 ```
 
@@ -355,7 +355,7 @@ mcp__context7__resolve-library-id:
 
 | Type | Pattern | Example | Anti-pattern |
 |------|---------|---------|-------------|
-| Controllers | Adjective/noun form | `AuthorizedController` | `AuthorizerController` |
+| Controllers | Adjective/noun form | `ApplicationController` | `AuthorizerController` |
 | Services | Verb+noun | `CreateUserService` | `UserCreator` |
 | Policies | `ModelPolicy` | `TestimonialPolicy` | `TestimonialAuth` |
 | Concerns | Adjective/capability | `Authenticatable` | `Authenticator` |
@@ -578,38 +578,7 @@ add_index :push_notification_tokens, [:device_token], unique: true
 
 ## MCP Integrations
 
-### Mermaid MCP
-
-Use for generating architecture diagrams:
-
-```
-# Generate class diagram
-mcp__mermaid__render:
-  diagram: |
-    classDiagram
-    PushNotifications --> TokenManager
-    PushNotifications --> SendService
-    SendService --> FirebaseAdapter
-    SendService --> Sidekiq
-
-# Generate sequence diagram
-mcp__mermaid__render:
-  diagram: |
-    sequenceDiagram
-    participant App
-    participant API
-    participant Service
-    participant Firebase
-    App->>API: registerPushToken
-    API->>Service: store_token
-    Service-->>API: success
-```
-
-**Use Cases:**
-- Generate architecture diagrams for ADRs
-- Visualize service dependencies
-- Document data flow patterns
-- Create sequence diagrams for complex workflows
+<!-- mcp__mermaid__* removed — server does not exist in this environment (Fable audit 2026-06-10). Use text-based architecture diagrams in ADRs instead. -->
 
 ---
 
@@ -708,12 +677,12 @@ Each phase should include a "stop here" evaluation:
 
 ### PBP-Specific Guidance
 
-Given PBP's current state (852+ migrations, 14 gateways, mix of ApplicationService and Interactor):
+Given PBP's current state (900+ migrations (run `ls db/migrate | wc -l`), 14 gateways, mix of ApplicationService and Interactor):
 
 1. **Don't introduce new patterns** — PBP already has `ApplicationService` and `Interactor`. Use what exists.
 2. **Focus Phase 1 on payment models** — Most callback violations are in payment/membership models.
 3. **Phase 2 query objects are low priority** — PBP uses scopes effectively.
-4. **Phase 3 underway** — Pundit policies exist in `app/policies/`. Follow that pattern for authorization.
+4. **Phase 3 underway** — The project uses `action_policy` gem (NOT Pundit). Real policies live in `packs/orgs/app/policies/` (`Orgs::BasePolicy`), `packs/internal_backend/app/policies/internal/` (internal admin policies: `Internal::BasePolicy`, `Internal::FacilityPolicy`, etc.), and `app/policies/` (nearly empty, only `UserPasswordUpdatePolicy`). Follow those patterns for authorization.
 5. **Phase 4 is not needed** — ERB views are simple enough. No ViewComponent/presenter needed.
 
 ---
@@ -734,108 +703,6 @@ Given PBP's current state (852+ migrations, 14 gateways, mix of ApplicationServi
 
 **Recent Improvements**:
 
-<!-- Kaizen: 2026-01-24 - Jupyter Notebook Integration -->
-## 📓 Jupyter Notebook Integration (Recommended)
-
-Use JupyterLab for **architecture data analysis** when you need to:
-- Analyze production data volumes and patterns
-- Prototype data models with real data
-- Create visual representations of data relationships
-- Document architecture decisions with data evidence
-
-### Launch Jupyter for Architecture Analysis
-
-```bash
-~/jupyter-env/bin/jupyter lab
-```
-
-### Example Architecture Analysis Notebook
-
-```python
-# Cell 1: Setup
-%load_ext sql
-%sql clickhouse://default:@localhost:8123/pbp_productionDB_optimized
-
-# Cell 2: Analyze data volumes for capacity planning
-%%sql
-SELECT
-  'users' as table_name, count(*) as rows FROM users
-UNION ALL
-SELECT 'reservations', count(*) FROM reservations
-UNION ALL
-SELECT 'memberships', count(*) FROM memberships
-UNION ALL
-SELECT 'payments', count(*) FROM payments
-ORDER BY rows DESC
-
-# Cell 3: Analyze growth trends
-%%sql
-SELECT
-  toStartOfMonth(created_at) as month,
-  count(*) as new_records
-FROM reservations
-WHERE created_at > now() - INTERVAL 12 MONTH
-GROUP BY month
-ORDER BY month
-
-# Cell 4: Visualize growth
-import pandas as pd
-import matplotlib.pyplot as plt
-
-df = _
-df['month'] = pd.to_datetime(df['month'])
-df.plot(x='month', y='new_records', kind='line', marker='o')
-plt.title('Reservations Growth Rate')
-plt.ylabel('New Records per Month')
-
-# Cell 5: Check cardinality for schema design
-%%sql
-SELECT
-  'facility_id' as field,
-  uniqExact(facility_id) as unique_values,
-  count(*) as total_rows,
-  round(count(*) / uniqExact(facility_id), 2) as avg_per_value
-FROM reservations
-UNION ALL
-SELECT 'user_id', uniqExact(user_id), count(*), round(count(*) / uniqExact(user_id), 2)
-FROM reservations
-UNION ALL
-SELECT 'status', uniqExact(status), count(*), round(count(*) / uniqExact(status), 2)
-FROM reservations
-```
-
-### Schema Design Analysis
-
-```python
-# Check NULL patterns for schema decisions
-%%sql
-SELECT
-  'acquired_at' as field,
-  countIf(acquired_at IS NULL) as nulls,
-  countIf(acquired_at IS NOT NULL) as non_nulls,
-  round(countIf(acquired_at IS NULL) / count(*) * 100, 2) as null_pct
-FROM memberships
-UNION ALL
-SELECT 'expires_at', countIf(expires_at IS NULL), countIf(expires_at IS NOT NULL),
-       round(countIf(expires_at IS NULL) / count(*) * 100, 2)
-FROM memberships
-
-# Relationship analysis
-%%sql
-SELECT
-  count(DISTINCT m.user_id) as users_with_memberships,
-  (SELECT count(*) FROM users) as total_users,
-  round(count(DISTINCT m.user_id) / (SELECT count(*) FROM users) * 100, 2) as pct
-FROM memberships m
-```
-
-### MCP IDE Tools Available
-
-- `mcp__ide__executeCode`: Execute Python in active Jupyter kernel
-- `mcp__ide__getDiagnostics`: Get language diagnostics
-
-<!-- Kaizen entries will be added here -->
-
 <!-- Kaizen: 2026-01-31 - MCP Tools Integration -->
 **Issue**: Step 3 didn't mention MCP tools for ClickHouse access, assumed docker-compose
 **Root Cause**: Skill tried `docker compose exec clickhouse` first, failed, then remembered MCP exists
@@ -855,19 +722,31 @@ FROM memberships m
 - Rule: Respect approved scope before enforcing a destructive step (DELETE/cleanup) — never design one as a default/enforced behavior if the ticket marked it out-of-scope. Approval of X (e.g. links) ≠ approval to delete other tables.
 - Why: In CORE-624 I nearly designed faves/user_stats deletion into the engine as an enforced default; the user caught that Erick had scoped those tables out — the exact scope creep (L3) I had criticized in TRIAGE-10.
 - How to apply: When designing, re-read the approval record ("Out of scope / Pendiente / cleanup separado") before adding a destructive step as default/enforced. If out of scope: leave it out or strictly opt-in pending separate sign-off. Distinguish integrity consequences of an approved action (touch/reindex) from new destructive ops on other tables.
-- Source: User correction on 2026-05-22. See `memory/feedback_respect_approved_scope.md`.
+- Source: User correction on 2026-05-22. See `~/.claude/projects/-Users-leon-workspace-pbp-platform/memory/feedback_respect_approved_scope.md`.
 
 <!-- Kaizen: 2026-05-25 - User correction -->
 - Rule: When deciding "where code/docs live", classify team-shared vs personal FIRST. Personal/local files (linked from `CLAUDE.local.md`, workflow notes, ticket research) NEVER go in `docs/` (committed); they go to gitignored locations.
 - Why: While extracting reference docs out of `CLAUDE.local.md`, I placed them in `docs/development/` (committed) — personal notes would have reached the team repo. User: "si son local no deben estar donde es la doc de todo el equipo".
 - How to apply: For any file-location decision, run `git check-ignore <path>` to confirm intent. In this repo: `docs/` = team/committed; `investigations/` + `.claude/` = personal/excluded; add new excluded paths to `.git/info/exclude` (local), NOT `.gitignore` (team).
-- Source: User correction on 2026-05-25. See `memory/feedback_personal_files_excluded_location.md`.
+- Source: User correction on 2026-05-25. See `~/.claude/projects/-Users-leon-workspace-pbp-platform/memory/feedback_personal_files_excluded_location.md`.
 
 <!-- Kaizen: 2026-06-05 - User correction -->
 - Rule: When grounding a design in library/API docs, a NEGATIVE result ("the SDK has no X") is LOW-CONFIDENCE. Confirm against the authoritative structural source (Context7 dataclass/signature dump, or the reference/config page) before designing around the absence; an independent auditor contradicting a negative is high-signal.
 - Why: A docs-research agent over-trusts the first page; a negative is unfalsifiable from one search. `max_budget_usd` was called non-existent (wrong SDK pages searched) but the Context7 dataclass showed it exists — nearly shipped a design that self-tracked cost instead of using the native cap.
 - How to apply: For any design-affecting "X doesn't exist", run a targeted Context7 query for the exact type/dataclass/signature first; prefer a second independent check before committing the design.
-- Source: User correction on 2026-06-05. See `memory/feedback_negative_research_result_low_confidence.md`.
+- Source: User correction on 2026-06-05. See `~/.claude/projects/-Users-leon-workspace-pbp-platform/memory/feedback_negative_research_result_low_confidence.md`.
+
+<!-- Kaizen: 2026-06-10 — MCP tool-name + org sweep (Fable audit Tier 2') -->
+- Updated stale MCP tool names to the current environment (ClickHouse run_select_query → run_query).
+- Removed references to nonexistent server: mcp__mermaid__* (replaced with text note in MCP Integrations section).
+- Fixed authorization guidance: replaced Pundit with the actual gem (`action_policy`), updated example to resolve `action_policy`, corrected policy location to `packs/orgs/app/policies/` (`Orgs::BasePolicy`) and noted `app/policies/` is nearly empty.
+
+<!-- Kaizen: 2026-06-10 — Lateral propagation fix: AuthorizedController (fictional) replaced with ApplicationController (real, verified ls app/controllers/); migration count updated from stale "852+" to "900+ (run ls db/migrate | wc -l)" (verified: 933); internal_backend slice added to Phase 3 policy guidance: packs/internal_backend/app/policies/internal/ (verified ls). Fable re-audit: lateral propagation. -->
 
 <!-- kaizen 2026-06-09: "implement the plan" = classify by executor first -->
 When the user says "implement the plan / do it" over a plan, run a CLASSIFICATION pass before any coding: tag each item {me-now / user-interactive-action / external-sign-off-gated / no-op}. Adoption/meta/strategy plans often have little-to-no code-for-me — do only the me-now subset (gitignored prep), hand the user their commands, DRAFT (never auto-send/commit) gated items, and name no-ops as done-by-decision. Do not fabricate busywork or cross a sign-off/commit/destructive gate. See memory feedback_implement_plan_classify_by_executor.
+
+<!-- Kaizen: 2026-06-13 - User correction (coordinator delegates investigation) -->
+- Rule: When `/architect` runs under an `/orchestrate` coordinator, the coordinator does NOT do the research/investigation itself — it dispatches it (architect as a worker/analyst, or `Agent(Explore)` for searches). The coordinator only reads trivially to plan the dispatch.
+- Why: pure-coordinator contract — the coordinator orchestrates, never does real work (no Bash/edits/investigation in-thread).
+- Source: User correction on 2026-06-13. See `~/.claude/projects/-Users-leon-workspace-pbp-platform/memory/feedback_coordinator_delegates_all_work.md`.
