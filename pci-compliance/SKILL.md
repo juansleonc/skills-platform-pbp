@@ -1,7 +1,7 @@
 ---
 name: pci-compliance
 description: Validates PCI-DSS compliance for payment code across 14 gateways. Ensures card data protection, secure transmission, and proper credential handling.
-allowed-tools: [Bash, Read, Grep, Glob, Edit, mcp__clickhouse__run_select_query, mcp__honeybadger__list_faults, mcp__stripe__*]
+allowed-tools: [Bash, Read, Grep, Glob, Edit, mcp__clickhouse__run_query, mcp__honeybadger__list_faults]
 disable-model-invocation: false
 ---
 
@@ -17,6 +17,8 @@ disable-model-invocation: false
 # PCI Compliance Validation Skill
 
 Validates PCI-DSS compliance for all payment-related code across the 14 supported payment gateways.
+
+> **Skill boundary**: Use `/pci-compliance` for card-data protection, secure transmission (Reqs 3/4/6/7/10), and credential handling across the 14 gateways. Use `/security` for general OWASP concerns (mass-assignment, CSRF, auth, Brakeman full-app). Use `/gateway-consistency` to detect cross-gateway divergence in interface, error handling, and idempotency patterns — not card-data compliance.
 
 ## Supported Gateways (14)
 
@@ -60,19 +62,18 @@ grep -rn "token\|payment_method_id" app/models/payment.rb
 
 **ClickHouse Verification:**
 
-```sql
--- Check no full card numbers in payments table
-SELECT
-  count(*) as total,
-  countIf(length(card_number) > 4) as exposed_full_cards,
-  countIf(card_number IS NOT NULL AND card_number NOT LIKE '%****%') as unmasked
-FROM pbp_productionDB_optimized.payments
-WHERE card_number IS NOT NULL;
+> **Columns verified 2026-06-10 against production ClickHouse.** Real columns in `pbp_productionDB_optimized.payments`: `id, gateway, status, paid, payment_method, payment_source, card_brand, last_four_card_digits, card_connect_token, card_connect_retref, card_connect_authcode, stripe_charge_id, stripe_customer_id, stripe_token_id, meta, facility_id, facility_name, user_id, reservation_id, currency, tax, tip, discount, created_at, updated_at, most_recent_date, transaction_id, expiration_date`. Columns `card_number`, `notes`, `token`, `processing_time_ms` do NOT exist.
 
--- Check for patterns that look like card numbers in any text field
-SELECT count(*) as suspicious
-FROM pbp_productionDB_optimized.payments
-WHERE toString(notes) REGEXP '[0-9]{13,19}';
+```sql
+-- Check for patterns that look like card numbers in the meta free-text column
+-- meta is the only free-text-ish column; match() is ClickHouse RE2 syntax (not REGEXP)
+-- FINAL required: payments uses SharedReplacingMergeTree (deduplicates row versions)
+SELECT count() FROM pbp_productionDB_optimized.payments FINAL
+WHERE match(toString(meta), '\\d{13,16}');
+
+-- Check last_four_card_digits for any suspiciously long values (should always be 4 chars)
+SELECT count() FROM pbp_productionDB_optimized.payments FINAL
+WHERE length(last_four_card_digits) > 4;
 ```
 
 ### Requirement 4: Encrypt Transmission
@@ -81,10 +82,11 @@ WHERE toString(notes) REGEXP '[0-9]{13,19}';
 
 ```bash
 # 1. All payment API calls use HTTPS
-grep -rn "http://" app/services/payment_service/ app/adapters/ --include="*.rb"
+# Note: app/adapters/ contains patch/ultra/utm adapters only — payment gateways live in app/services/payment_service/gateway/
+grep -rn "http://" app/services/payment_service/ --include="*.rb"
 
 # 2. Gateway endpoints are HTTPS
-grep -rn "api_url\|endpoint\|base_uri" app/adapters/ --include="*.rb" | grep -v "https"
+grep -rn "api_url\|endpoint\|base_uri" app/services/payment_service/gateway/ --include="*.rb" | grep -v "https"
 
 # 3. No insecure SSL options
 grep -rn "verify_ssl.*false\|ssl_verify.*false\|verify_peer.*false" app/ --include="*.rb"
@@ -96,7 +98,8 @@ grep -rn "verify_ssl.*false\|ssl_verify.*false\|verify_peer.*false" app/ --inclu
 
 ```bash
 # 1. Run Brakeman on payment code
-bin/d brakeman --only-files app/services/payment_service/,app/adapters/,app/controllers/*payment*
+# Note: app/adapters/ contains non-payment adapters (patch/ultra/utm); payment gateways are in app/services/payment_service/gateway/
+bin/d brakeman --only-files app/services/payment_service/,app/controllers/*payment*
 
 # 2. Check for SQL injection in payment queries
 grep -rn "where(\".*\#{" app/services/payment_service/ --include="*.rb"
@@ -137,18 +140,18 @@ grep -rn "Rails.logger.*card\|Rails.logger.*cvv\|Rails.logger.*password" app/ --
 ### Check Gateway Implementations
 
 ```bash
-# Find all gateway adapters
-ls -la app/adapters/
+# Find all gateway service directories (payment gateways live here, not in app/adapters/)
+ls -la app/services/payment_service/gateway/
 
 # Check each gateway for PCI patterns
 for gateway in azul_pay bac card_connect dpo_pay icount kushki_pay mitec one_pay pay_code pay_fast pixel_pay razor_pay stripe xendit; do
   echo "=== Checking $gateway ==="
 
   # Check for sensitive data logging
-  grep -rn "logger\|puts\|print" app/adapters/${gateway}* app/services/payment_service/${gateway}* 2>/dev/null | grep -i "card\|cvv\|token"
+  grep -rn "logger\|puts\|print" app/services/payment_service/gateway/${gateway}/ 2>/dev/null | grep -i "card\|cvv\|token"
 
   # Check for HTTP (not HTTPS)
-  grep -rn "http://" app/adapters/${gateway}* app/services/payment_service/${gateway}* 2>/dev/null
+  grep -rn "http://" app/services/payment_service/gateway/${gateway}/ 2>/dev/null
 done
 ```
 
@@ -158,9 +161,9 @@ done
 # Credentials should be in merchants table, encrypted
 grep -rn "attr_encrypted\|encrypted_" app/models/merchant*.rb
 
-# No hardcoded credentials
-grep -rn "api_key\s*=\s*['\"]" app/adapters/ app/services/payment_service/ --include="*.rb"
-grep -rn "secret_key\s*=\s*['\"]" app/adapters/ app/services/payment_service/ --include="*.rb"
+# No hardcoded credentials (payment gateways live in app/services/payment_service/gateway/)
+grep -rn "api_key\s*=\s*['\"]" app/services/payment_service/ --include="*.rb"
+grep -rn "secret_key\s*=\s*['\"]" app/services/payment_service/ --include="*.rb"
 ```
 
 ## Audit Process
@@ -175,34 +178,35 @@ echo "1. Checking for exposed card data..."
 grep -rn "card_number\|cvv\|cvc" app/ lib/ --include="*.rb" | grep -v "last_four\|last4\|masked\|#"
 
 echo "2. Checking for insecure HTTP..."
-grep -rn "http://" app/services/payment_service/ app/adapters/ --include="*.rb"
+grep -rn "http://" app/services/payment_service/ --include="*.rb"
 
 echo "3. Checking for sensitive data logging..."
 grep -rn "Rails.logger\|Honeybadger.context" app/ --include="*.rb" | grep -i "card\|cvv\|password\|token"
 
 echo "4. Running Brakeman on payment code..."
-bin/d brakeman --only-files app/services/payment_service/,app/adapters/ -q
+bin/d brakeman --only-files app/services/payment_service/ -q
 ```
 
 ### Step 2: ClickHouse Data Verification
 
+> **Columns verified 2026-06-10 against production ClickHouse.** `card_number`, `token` do NOT exist; use `last_four_card_digits`, `card_connect_token`, `stripe_token_id` instead. FINAL is required after the table reference (SharedReplacingMergeTree).
+
 ```sql
--- Check payment data patterns
+-- Per-gateway payment volume (real columns only)
 SELECT
   gateway,
-  count(*) as total_payments,
-  countIf(card_number IS NOT NULL) as with_card_number,
-  countIf(token IS NOT NULL) as with_token
-FROM pbp_productionDB_optimized.payments
+  count() as total_payments,
+  countIf(last_four_card_digits != '') as with_card_digits,
+  countIf(card_connect_token != '') as with_cc_token,
+  countIf(stripe_token_id != '') as with_stripe_token
+FROM pbp_productionDB_optimized.payments FINAL
 GROUP BY gateway
 ORDER BY total_payments DESC;
 
--- Check for any unmasked card data
-SELECT id, gateway, card_number
-FROM pbp_productionDB_optimized.payments
-WHERE card_number IS NOT NULL
-  AND length(card_number) > 4
-  AND card_number NOT LIKE '****%'
+-- Check meta column for anything resembling a full card number (PCI leak scan)
+SELECT id, gateway, meta
+FROM pbp_productionDB_optimized.payments FINAL
+WHERE match(toString(meta), '\\d{13,16}')
 LIMIT 10;
 ```
 
@@ -326,36 +330,6 @@ OVERALL: ✅ PCI COMPLIANT
 
 ---
 
-## Kaizen: Continuous Improvement
+## Kaizen
 
-> "Every day we must improve" - 改善
-
-**While executing this skill**, if you discover:
-- A new PCI requirement pattern
-- A missing gateway check
-- A better validation approach
-
-**You MUST**:
-1. Complete the current PCI audit first
-2. Then append improvements to this skill file using Edit tool
-3. Format: `<!-- Kaizen: YYYY-MM-DD --> New content`
-
-**Recent Improvements**:
-
-<!-- Kaizen: 2026-06-10 -->
-**Correction: gateway table had wrong entries; loop was misaligned**
-
-**What was wrong:**
-1. `luka_pay` listed as a gateway — it is NOT. It is a separate implementation at `app/services/payments/lukapay/` that does not follow the gateway pattern. Listing it causes audit loops to look for `app/services/payment_service/gateway/luka_pay/` which does not exist.
-2. `xendit` was missing from the table despite having a full gateway implementation at `app/services/payment_service/gateway/xendit/` (default currency IDR, supports PHP/THB/VND/MYR/USD per xendit/base.rb).
-3. `mitec` region was listed as "Brazil" — it is a Mexican processor (GetNet MEX). Endpoint domains are `mitec.com.mx`; error messages say "GetNet (MEX)".
-4. The gateway loop included `luka_pay` (non-existent directory) and omitted `xendit`.
-
-**What was corrected:**
-- Gateway table now lists exactly the 14 directories found in `app/services/payment_service/gateway/`.
-- Added note about `lukapay` being a separate non-gateway implementation at `app/services/payments/lukapay/`.
-- `xendit` added with correct region (Indonesia/Philippines, default IDR per xendit/base.rb:41).
-- `mitec` region corrected to Mexico.
-- Gateway loop updated to match real directory names (alphabetical order).
-
-**Lesson**: the gateway list must be generated from `ls app/services/payment_service/gateway/` — never hand-maintained. Any discrepancy between the table and that directory means either a new gateway was added without updating the skill, or an entry was fabricated.
+Improvement log archived to [kaizen_log.md](kaizen_log.md). Append new entries there with `<!-- Kaizen: YYYY-MM-DD -->` format; promote stable lessons into the skill body above.
