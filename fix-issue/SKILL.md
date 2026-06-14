@@ -1,7 +1,7 @@
 ---
 name: fix-issue
 description: Analyze GitHub issues and implement solutions with tests
-allowed-tools: [Bash, Read, Write, Edit, Grep, Glob, mcp__github__*, mcp__honeybadger__list_faults, mcp__honeybadger__get_fault, mcp__sentry__sentry_list_projects, mcp__sentry__sentry_list_issues, mcp__sentry__sentry_get_issue, mcp__sentry__sentry_get_issue_events]
+allowed-tools: [Bash, Read, Write, Edit, Grep, Glob, mcp__github__*, mcp__honeybadger__list_faults, mcp__honeybadger__get_fault, mcp__sentry__find_projects, mcp__sentry__search_issues, mcp__sentry__search_issue_events, mcp__sentry__get_sentry_resource]
 disable-model-invocation: true
 ---
 
@@ -34,12 +34,12 @@ Analyze a GitHub issue, implement the solution, and create tests.
 
    **Sentry:**
    ```
-   mcp__sentry__sentry_list_issues:
+   mcp__sentry__search_issues:
      org_slug: "sentry"
      project_slug: "platform"  # or graphql_pro, pbp-mobile, etc.
      query: "is:unresolved <search_term>"
 
-   mcp__sentry__sentry_get_issue:
+   mcp__sentry__get_sentry_resource:
      issue_id: "<issue_id>"
    ```
 
@@ -74,7 +74,7 @@ Analyze a GitHub issue, implement the solution, and create tests.
    docker compose exec -e SIMPLECOV_REPORT=true web bundle exec rspec <affected_specs>  # bin/d rspec for plain run
 
    # For MODIFIED files - Pronto (preserves legacy code)
-   bin/d pronto run -c develop
+   bin/d bundle exec pronto run -r rubocop -c develop -f text
 
    # For NEW files only - RuboCop full lint
    bin/d rubocop -A <new_files>
@@ -118,7 +118,7 @@ Analyze a GitHub issue, implement the solution, and create tests.
 ## Commit Message Format
 
 ```
-TICKET | fix(<scope>): <description>
+TICKET | EMOJI fix(<scope>): <description>
 
 Fixes #<issue-number>
 
@@ -126,6 +126,9 @@ Fixes #<issue-number>
 - <change 2>
 
 ```
+
+Examples: `PLA-456 | 🐛 fix(checkout): Handle nil membership expiration date`
+(CLAUDE.local.md rule #14 — gitmoji always required)
 
 ## Example
 
@@ -188,7 +191,7 @@ Running full spec suite for affected files...
 ### Ready to commit?
 Proposed commit:
 ```
-PLA-456 | fix(checkout): Handle nil membership expiration date
+PLA-456 | 🐛 fix(checkout): Handle nil membership expiration date
 
 Fixes #456
 
@@ -211,23 +214,20 @@ Use for direct GitHub API access:
 ```
 # Get issue details with comments
 mcp__github__get_issue:
-  owner: "playbypoint"
+  owner: "PlaybyCourt"
   repo: "platform"
   issue_number: 456
 
-# List issue comments
-mcp__github__list_issue_comments:
-  owner: "playbypoint"
-  repo: "platform"
-  issue_number: 456
+# List issue comments — mcp__github__list_issue_comments does not exist; use gh CLI:
+# gh issue view 456 --comments
 
 # Search for related issues
 mcp__github__search_issues:
-  q: "repo:playbypoint/platform is:issue membership"
+  q: "repo:PlaybyCourt/platform is:issue membership"
 
 # Get linked PR if exists
 mcp__github__list_pull_requests:
-  owner: "playbypoint"
+  owner: "PlaybyCourt"
   repo: "platform"
   state: "all"
   head: "fix/issue-456"
@@ -241,19 +241,6 @@ mcp__github__list_pull_requests:
 
 ---
 
-## Kaizen: Continuous Improvement
+## Improvement Log
 
-> "Every day we must improve" - 改善
-
-**While executing this skill**, if you discover:
-- A new debugging pattern
-- A missing analysis step
-- A better issue template format
-
-**You MUST**:
-1. Complete the current issue fix first
-2. Then append improvements to this skill file using Edit tool
-3. Format: `<!-- Kaizen: YYYY-MM-DD --> New content`
-
-**Recent Improvements**:
-<!-- Kaizen entries will be added here -->
+Historical improvements archived in [`kaizen_log.md`](kaizen_log.md). To propose a skill improvement, run `/kaizen` after completing the issue fix — do not self-edit this file mid-execution.
