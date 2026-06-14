@@ -1,7 +1,7 @@
 ---
 name: debug
 description: Production debugging using Honeybadger, Sentry, ClickHouse, logs, and Rails console. Systematic approach to diagnose and fix production issues.
-allowed-tools: [Bash, Read, Grep, Glob, Edit, mcp__github__*, mcp__clickhouse__run_select_query, mcp__clickhouse__list_tables, mcp__honeybadger__list_faults, mcp__honeybadger__get_fault, mcp__honeybadger__list_fault_notices, mcp__sentry__sentry_list_projects, mcp__sentry__sentry_list_issues, mcp__sentry__sentry_get_issue, mcp__sentry__sentry_get_issue_events, mcp__opensearch__*, mcp__rails__*, mcp__ide__executeCode, mcp__ide__getDiagnostics]
+allowed-tools: [Bash, Read, Grep, Glob, Edit, mcp__github__*, mcp__clickhouse__run_query, mcp__clickhouse__list_tables, mcp__honeybadger__list_faults, mcp__honeybadger__get_fault, mcp__honeybadger__list_fault_notices, mcp__sentry__find_projects, mcp__sentry__search_issues, mcp__sentry__search_issue_events, mcp__sentry__get_sentry_resource, mcp__opensearch__*, mcp__rails__execute_ruby]
 disable-model-invocation: false
 ---
 
@@ -322,7 +322,7 @@ mcp__honeybadger__list_fault_notices:
 
 **List Available Projects:**
 ```
-mcp__sentry__sentry_list_projects
+mcp__sentry__find_projects
 ```
 
 **Key Projects:**
@@ -336,7 +336,7 @@ mcp__sentry__sentry_list_projects
 
 **List Issues in Project:**
 ```
-mcp__sentry__sentry_list_issues:
+mcp__sentry__search_issues:
   org_slug: "sentry"
   project_slug: "platform"
   query: "is:unresolved"
@@ -345,13 +345,13 @@ mcp__sentry__sentry_list_issues:
 
 **Get Issue Details (with stacktrace):**
 ```
-mcp__sentry__sentry_get_issue:
+mcp__sentry__get_sentry_resource:
   issue_id: "<issue_id>"
 ```
 
 **Get Recent Events for Issue:**
 ```
-mcp__sentry__sentry_get_issue_events:
+mcp__sentry__search_issue_events:
   issue_id: "<issue_id>"
   limit: 5
 ```
@@ -369,7 +369,7 @@ mcp__sentry__sentry_get_issue_events:
 | `tags` | Environment, browser, device info |
 | `stacktrace` | Full stack trace (from get_issue) |
 
-## Step 2: Analyze with ClickHouse
+## Step 3: Analyze with ClickHouse
 
 ### Find Affected Records
 
@@ -378,7 +378,7 @@ mcp__sentry__sentry_get_issue_events:
 SELECT
   facility_id,
   count(*) as error_count
-FROM pbp_productionDB_optimized.payments
+FROM pbp_productionDB_optimized.payments FINAL
 WHERE status = 'failed'
   AND created_at > now() - INTERVAL 7 DAY
 GROUP BY facility_id
@@ -390,7 +390,7 @@ SELECT
   facility_id,
   created_at,
   error_message
-FROM pbp_productionDB_optimized.<table>
+FROM pbp_productionDB_optimized.<table> FINAL
 WHERE <condition>
   AND created_at BETWEEN '<start>' AND '<end>'
 ORDER BY created_at DESC
@@ -402,13 +402,13 @@ LIMIT 100;
 ```sql
 -- Find orphaned records
 SELECT count(*)
-FROM pbp_productionDB_optimized.reservations r
-LEFT JOIN pbp_productionDB_optimized.users u ON r.user_id = u.id
+FROM pbp_productionDB_optimized.reservations FINAL r
+LEFT JOIN pbp_productionDB_optimized.users FINAL u ON r.user_id = u.id
 WHERE u.id IS NULL;
 
 -- Find NULL values that shouldn't exist
 SELECT *
-FROM pbp_productionDB_optimized.<table>
+FROM pbp_productionDB_optimized.<table> FINAL
 WHERE <required_column> IS NULL
   AND created_at > now() - INTERVAL 30 DAY;
 
@@ -416,7 +416,7 @@ WHERE <required_column> IS NULL
 SELECT
   <unique_columns>,
   count(*) as count
-FROM pbp_productionDB_optimized.<table>
+FROM pbp_productionDB_optimized.<table> FINAL
 GROUP BY <unique_columns>
 HAVING count > 1;
 ```
@@ -428,13 +428,13 @@ HAVING count > 1;
 SELECT
   toStartOfHour(created_at) as hour,
   count(*) as count
-FROM pbp_productionDB_optimized.<table>
+FROM pbp_productionDB_optimized.<table> FINAL
 WHERE <error_condition>
 GROUP BY hour
 ORDER BY hour;
 ```
 
-## Step 3: Create Reproduction Script
+## Step 4: Create Reproduction Script
 
 ```ruby
 #!/usr/bin/env rails runner
@@ -515,7 +515,7 @@ Honeybadger.notify(error, context: { ... })
 ErrorService.new(error, context: { ... }).notify
 ```
 
-## Step 4: Common Debugging Patterns
+## Step 5: Common Debugging Patterns
 
 ### Payment Issues
 
@@ -577,13 +577,13 @@ result = SomeService.call
 puts "Total queries: #{query_count}"
 ```
 
-## Step 5: Log Analysis
+## Step 6: Log Analysis
 
 ### Rails Logs
 
 ```bash
 # Search for specific error in logs
-docker compose exec web tail -f log/development.log | grep -i "error\|exception"
+bin/d sh -c 'tail -f log/development.log | grep -i "error\|exception"'
 
 # Filter by request ID
 grep "request_id=abc123" log/production.log
@@ -596,13 +596,13 @@ grep "SLOW QUERY" log/production.log
 
 ```bash
 # Check job failures
-docker compose exec web tail -f log/sidekiq.log | grep -i "fail\|error"
+bin/d sh -c 'tail -f log/sidekiq.log | grep -i "fail\|error"'
 
 # Find specific job
 grep "AutomaticRenewalMembershipJob" log/sidekiq.log
 ```
 
-## Step 6: Debugging Checklist
+## Step 7: Debugging Checklist
 
 For each issue:
 
@@ -637,7 +637,7 @@ NoMethodError: undefined method `expires_at' for nil:NilClass
 ### ClickHouse Analysis
 ```sql
 -- Found 234 memberships with NULL membership_plan
-SELECT count(*) FROM memberships WHERE membership_plan_id IS NULL;
+SELECT count(*) FROM pbp_productionDB_optimized.memberships FINAL WHERE membership_plan_id IS NULL;
 ```
 
 ### Root Cause
@@ -679,7 +679,7 @@ Found: Fault #8901 - "NoMethodError in AutomaticRenewalMembershipJob"
 
 ```sql
 SELECT interval, count(*), countIf(auto_renew = 1) as should_renew
-FROM pbp_productionDB_optimized.memberships
+FROM pbp_productionDB_optimized.memberships FINAL
 WHERE status = 'active' AND expires_at < now()
 GROUP BY interval;
 ```
@@ -729,21 +729,18 @@ Use for finding related issues and PRs:
 ```
 # Search for similar issues
 mcp__github__search_issues:
-  q: "repo:playbypoint/platform is:issue label:bug membership renewal"
+  q: "repo:PlaybyCourt/platform is:issue label:bug membership renewal"
 
 # Check if issue exists for this error
 mcp__github__search_issues:
-  q: "repo:playbypoint/platform is:issue NoMethodError membership"
+  q: "repo:PlaybyCourt/platform is:issue NoMethodError membership"
 
-# Get issue timeline for context
-mcp__github__list_issue_events:
-  owner: "playbypoint"
-  repo: "platform"
-  issue_number: 456
+# Get issue timeline for context (mcp__github__list_issue_events not available; use gh CLI instead)
+# gh issue view 456 --repo PlaybyCourt/platform --comments
 
 # Create issue for discovered bug
 mcp__github__create_issue:
-  owner: "playbypoint"
+  owner: "PlaybyCourt"
   repo: "platform"
   title: "[BUG] Weekly memberships not renewing"
   body: "## Description\n..."
@@ -756,10 +753,10 @@ Use for debugging search issues:
 
 ```
 # Check index health
-mcp__opensearch__cluster_health
+mcp__opensearch__ClusterHealthTool
 
 # Debug search queries
-mcp__opensearch__search:
+mcp__opensearch__SearchIndexTool:
   index: "users"
   explain: true
   query: { "match": { "email": "test@example.com" } }
@@ -771,12 +768,12 @@ Use for interactive debugging:
 
 ```
 # Query data in console
-mcp__rails__console:
-  command: "Membership.weekly.renewable.count"
+mcp__rails__execute_ruby:
+  code: "Membership.weekly.renewable.count"
 
 # Check model associations
-mcp__rails__console:
-  command: "Membership.reflect_on_all_associations.map { |a| [a.name, a.macro] }"
+mcp__rails__execute_ruby:
+  code: "Membership.reflect_on_all_associations.map { |a| [a.name, a.macro] }"
 ```
 
 ---
@@ -797,261 +794,24 @@ mcp__rails__console:
 
 **Recent Improvements**:
 
-<!-- Kaizen: 2026-01-24 - Jupyter Notebook Integration -->
-## 📓 Jupyter Notebook Integration (Optional)
+<!-- Kaizen: 2026-01-24 - Jupyter Notebook Integration — archived to kaizen_log.md. Local-only; ~/jupyter-env/bin/jupyter lab; mcp__ide tools NOT available. -->
+<!-- Kaizen: 2026-01-31 - MCP Tools Integration — Promoted to PRIMARY METHOD table. ROI: 3.0. Content in body. -->
+<!-- Kaizen: 2026-01-23 - Production Script Rules — archived to kaizen_log.md. Key rules: strftime not to_s(:db); nil-check before strftime; bin/d rails runner for local test; no heredocs in console; update_column to skip callbacks. -->
+<!-- Kaizen: 2026-02-11 - ClickHouse First Methodology — Promoted to body (Step 1, workflow diagram, priority table, query templates, real example). ROI: 5.0. -->
+- Real incident: payment_id=39204765 duplicate events 67ms apart — ClickHouse 30s vs Rails console 30min. Full content in Step 1 body.
 
-Use JupyterLab for **interactive debugging sessions** when you need to:
-- Explore data patterns iteratively
-- Document your debugging process with markdown
-- Keep a persistent record of queries and findings
+<!-- Kaizen: 2026-05-12 - User corrections (ENG-544) — rules promoted to Step 4 (repro script) and circuit-breaker section. -->
+- Real-request repro before runner stubs; bug must be in-scope (git diff); prod state must exist before fabricating. Sources: `memory/feedback_validate_bugs_via_real_request.md`, `memory/feedback_review_scope_and_real_repro.md`.
 
-### Launch Jupyter for Debugging
+<!-- Kaizen: 2026-06-10 — Step renumber + stale tool + Kaizen dedup (Fable re-audit hygiene pass) -->
+- Fixed: duplicate "Step 2" (Gather Error Context vs Analyze with ClickHouse). Renumbered: Step 2=Gather Error, Step 3=Analyze w/ ClickHouse, Step 4=Repro Script, Step 5=Common Patterns, Step 6=Log Analysis, Step 7=Checklist.
+- Replaced: nonexistent `mcp__github__list_issue_events` with `gh issue view` CLI fallback note.
+- Removed: `mcp__ide__executeCode` and `mcp__ide__getDiagnostics` from frontmatter; caveated Jupyter section.
+- Compressed Kaizen entries: 2026-01-31 (MCP priority table — in body), 2026-02-11 ClickHouse ROI essay (full content in Step 1 body — incident detail preserved), three 2026-05-12 (ENG-544 rules — in Steps 4/circuit-breaker).
 
-```bash
-~/jupyter-env/bin/jupyter lab
-```
-
-### Example Notebook for Debugging
-
-```python
-# Cell 1: Setup
-%load_ext sql
-%sql clickhouse://default:@localhost:8123/pbp_productionDB_optimized
-
-# Cell 2: Find error patterns
-%%sql
-SELECT
-  toStartOfHour(created_at) as hour,
-  count(*) as error_count
-FROM payments
-WHERE status = 'failed'
-  AND created_at > now() - INTERVAL 7 DAY
-GROUP BY hour
-ORDER BY hour
-
-# Cell 3: Visualize trends
-import pandas as pd
-import matplotlib.pyplot as plt
-
-df = _  # Last query result
-df.plot(x='hour', y='error_count', kind='line')
-plt.title('Failed Payments Over Time')
-```
-
-### When to Use Jupyter vs CLI
-
-| Scenario | Tool |
-|----------|------|
-| Quick error lookup | CLI (mcp__clickhouse) |
-| Iterative data exploration | Jupyter |
-| Documenting a debug session | Jupyter |
-| Simple fault check | Honeybadger MCP |
-| Complex pattern analysis | Jupyter |
-
-### MCP IDE Tools Available
-
-- `mcp__ide__executeCode`: Execute Python in active Jupyter kernel
-- `mcp__ide__getDiagnostics`: Get language diagnostics from VS Code
-
-<!-- Kaizen: 2026-01-31 - MCP Tools Integration -->
-## Kaizen Entry: MCP Tools as Primary Method
-
-**What Changed:**
-- Added reference to shared MCP tools guide at top of skill
-- Updated documentation to position MCP tools as PRIMARY method for debugging
-- Added priority table showing MCP tools (Honeybadger, ClickHouse, Sentry, OpenSearch) as 🥇 PRIMARY
-- Positioned Docker logs as 🥈 FALLBACK only
-
-**Why:**
-- Previous version didn't emphasize MCP tools strongly enough
-- Developers were falling back to Docker unnecessarily
-- MCP tools provide better production data access (10.4M users, 1.8K facilities)
-- Prevents repeating root cause: overlooking available tooling
-
-**Impact:**
-- Faster debugging (direct production data access)
-- Better error context (Honeybadger + Sentry integration)
-- Consistent patterns across all skills
-- ROI: 3.0 (High impact, Low effort)
-
-<!-- Kaizen: 2026-01-23 - Production Script Rules -->
-## ⚠️ CRITICAL: Production Script Rules
-
-When creating scripts for production Rails console, **ALWAYS** follow these rules:
-
-### 1. Ruby 3 Syntax Compatibility
-
-```ruby
-# ❌ WRONG - Deprecated in Ruby 3
-date.to_s(:db)
-time.to_s(:db)
-
-# ✅ CORRECT - Use strftime
-date.strftime('%Y-%m-%d')
-time.strftime('%Y-%m-%d %H:%M:%S')
-```
-
-### 2. Handle nil Values BEFORE Calling Methods
-
-```ruby
-# ❌ WRONG - Will crash if nil
-starts = membership.acquired_at.strftime('%Y-%m-%d %H:%M:%S')
-
-# ✅ CORRECT - Handle nil first
-starts = membership.acquired_at ? membership.acquired_at.strftime('%Y-%m-%d %H:%M:%S') : Time.current.strftime('%Y-%m-%d %H:%M:%S')
-```
-
-### 3. Test Scripts in Docker BEFORE Sending to Production
-
-```bash
-# ALWAYS test locally first
-bin/d rails runner "
-  # Your script here
-  puts 'Test output'
-"
-```
-
-### 4. NEVER Use Heredocs in Rails Console
-
-```ruby
-# ❌ WRONG - Heredocs don't paste well in console
-ActiveRecord::Base.connection.execute(<<-SQL)
-  SELECT * FROM users
-SQL
-
-# ✅ CORRECT - Single line or concatenated strings
-ActiveRecord::Base.connection.execute("SELECT * FROM users WHERE id = #{id}")
-```
-
-### 5. Skip Model Callbacks for Manual Data Fixes
-
-```ruby
-# ❌ WRONG - Triggers callbacks that may fail
-MembershipPayment.create!(payment_id: 123, ...)
-
-# ✅ CORRECT - Direct SQL for manual fixes
-ActiveRecord::Base.connection.execute("INSERT INTO membership_payments (...) VALUES (...)")
-
-# ✅ ALSO CORRECT - update_column skips callbacks
-payment.update_column(:paid, true)
-```
-
-### 6. Provide Step-by-Step Commands
-
-When giving commands for production, provide them **one at a time** so the user can:
-- Copy/paste easily
-- See the result of each step
-- Abort if something goes wrong
-
-<!-- Kaizen: 2026-02-11 - ClickHouse First Methodology -->
-## Kaizen Entry: ClickHouse First, Console Last
-
-**What Changed:**
-- Reordered debugging workflow to put ClickHouse as PHASE 1 (was PHASE 2)
-- Added priority ranking: ClickHouse 🥇 > Honeybadger 🥇 > Rails Console 🥈 > Docker logs 🥉
-- Added comprehensive ClickHouse query templates section
-- Added real debugging example showing 30 sec vs 30 min difference
-- Created query templates for: events investigation, duplicate detection, timeline analysis, related events
-
-**Why:**
-- Real debugging session (2026-02-11) showed massive time savings:
-  - ClickHouse query: 30 seconds → Found `payment_id=39204765` duplicated
-  - Rails Console: 30 minutes → 10+ manual queries to reach same conclusion
-- ClickHouse provides:
-  - Exact resource IDs from logs (payment_id, user_id, job_id)
-  - Millisecond precision timestamps (MySQL truncates to seconds)
-  - Historical data (years) vs current state only (Rails console)
-  - Instant pattern detection (duplicates, race conditions)
-  - No manual queries required
-- Rails Console is slow, requires multiple queries, and only shows current DB state
-- Previous workflow buried ClickHouse power under "optional" Step 2
-
-**Impact:**
-- **Time savings: 29 minutes per debugging session** (96% reduction)
-- Immediate duplicate/race condition detection (was manual analysis)
-- Better resource ID extraction (regex from logs vs manual DB queries)
-- Reduces cognitive load (one ClickHouse query vs 10+ Rails queries)
-- Prevents going down wrong paths (see data BEFORE hypothesizing)
-
-**ROI: 5.0 (CRITICAL)**
-- **Effort**: Medium (documentation update, workflow reorder)
-- **Value**: CRITICAL (saves hours per debugging session, prevents wrong conclusions)
-- **Applicability**: Every event-based debugging session
-- **Knowledge Transfer**: High (templates are reusable, teach ClickHouse patterns)
-
-**Lessons Learned:**
-1. **Always start with the data source that has the most context** (logs > DB state)
-2. **Precision matters** - 67ms difference only visible in ClickHouse (MySQL truncates)
-3. **Pattern detection is instant in SQL** - Detecting duplicates manually takes 10+ queries
-4. **Resource IDs in logs are gold** - Extract payment_id from logs, not from DB queries
-5. **"Query first, hypothesize second"** - See what actually happened before guessing
-
-**Real Example:**
-- **Issue**: Two payment_completed events 67ms apart, user suspects race condition
-- **ClickHouse (30s)**: Shows `payment_id=39204765` published twice with different user_ids
-- **Immediate diagnosis**: Race condition confirmed, bug in user_id logging
-- **Rails Console (30m)**: Would need: Payment.where(...), check users, check reservation, check MembershipPayments, analyze timestamps manually
-- **Conclusion**: ClickHouse saved 29 minutes and provided definitive answer instantly
-
-**Query Template Added:**
-```sql
--- Detect duplicate events (race conditions)
-SELECT
-  payment_id,
-  count(*) as event_count,
-  groupArray(user_id) as user_ids,
-  arrayDifference(groupArray(toUnixTimestamp64Milli(timestamp))) as time_diffs_ms
-FROM (
-  SELECT timestamp,
-    extractAllGroups(message, 'payment_id[=:](\d+)')[1] as payment_id,
-    extractAllGroups(message, 'user[=:](\d+)')[1] as user_id
-  FROM logs
-  WHERE message LIKE '%payment_completed%'
-)
-GROUP BY payment_id
-HAVING event_count > 1
-```
-
-**New Debugging Philosophy:**
-> "ClickHouse First, Console Last"
-> - Events/Logs → ClickHouse (30 seconds)
-> - Current DB state → Rails Console (fallback only)
-> - Code flow → Read files (only after understanding the issue)
-
-**Applicability:**
-- Event debugging (payment_completed, webhooks, jobs)
-- Duplicate detection (race conditions, retries)
-- Timeline analysis (when did it start?)
-- Performance debugging (slow queries, N+1)
-- Any debugging where logs contain resource IDs
-
-**Future Improvements:**
-- [ ] Add more query templates for common debugging patterns
-- [ ] Create ClickHouse cheat sheet for regex patterns
-- [ ] Add templates for webhook debugging
-- [ ] Add templates for job retry analysis
-- [ ] Document log format patterns for easier regex writing
-
-<!-- Kaizen: 2026-05-12 - User correction -->
-## Kaizen Entry: Reproduce HTTP-Facing Bugs via Real Request, Not Runner Stubs
-- Rule: For bugs in HTTP-facing code (GraphQL, controllers, middlewares, endpoint-triggered jobs), the local reproduction step should hit the real endpoint (Postman/curl/`graphql_post` spec) BEFORE writing a `rails runner` script that monkey-patches internals.
-- Why: Runner + monkey-patch bypasses request middleware, auth, and per-request shared context (e.g. graphql-ruby's resolver execution order, which surfaces aliased-query bugs only at request level). Stubs can confirm a hypothesis but fail to convince reviewers and can mask the real failure mode.
-- How to apply: After narrowing the bug via Honeybadger/ClickHouse, default to real request reproduction. Runner is appropriate (a) as a fast sanity check, (b) for purely internal services with no HTTP entry, or (c) for fast iteration during fix development after the real-request repro is on file.
-- Source: User correction on 2026-05-12 during ENG-544 adversarial review. See `memory/feedback_validate_bugs_via_real_request.md`.
-
-<!-- Kaizen: 2026-05-12 - User correction (scope + repro discipline) -->
-## Kaizen Entry: Bug Reports Must Be In-Scope AND Have Real Repro
-- Rule: When debugging a reported bug or hypothesizing a fix, the bug must (1) be reproducible against the current branch (not a pre-existing condition unrelated to the work in flight), and (2) have a real repro path — Honeybadger fault id, ClickHouse query, Rails console snippet, or HTTP request — NOT a thought experiment that only manifests under hand-injected raises or stubs.
-- Why: Time spent debugging pre-existing or theoretical bugs is time stolen from real ones. Stakeholders also lose trust when "bugs" turn out to be unreachable or out-of-scope.
-- How to apply: Before opening a debug investigation, check `git log -- <files>` and `git diff develop...HEAD` to confirm the bug is in scope. Then anchor every hypothesis to a concrete repro (fault id with notice count, query result, request that returns the bad response). Reject hypotheses that require monkey-patching to manifest.
-- Source: User correction on 2026-05-12 during ENG-544 adversarial review. See `memory/feedback_review_scope_and_real_repro.md`.
-
-<!-- Kaizen: 2026-05-12 - User correction (refinement: prod-state verification) -->
-## Kaizen Entry: Verify Bug State Exists In Prod Before Hypothesizing
-- When investigating a bug or proposing a debugging hypothesis, verify the precondition exists in prod data BEFORE fabricating it locally with `update_columns` / `destroy_all` / etc. Use `mcp__clickhouse__run_query` to count rows matching the condition; check Honeybadger for recurring faults at the same code path. If the condition has 0 occurrences in prod, the bug is theoretical — debugging time is better spent elsewhere.
-- Final filter when triaging: "Does a real user, with real data, in a real client flow, observe this behavior?" — if no, drop the hypothesis.
-- Why: Without this check, debugging investigations chase ghosts and burn time on bugs no user will ever hit. Time spent on theoretical bugs is time stolen from real ones.
-- Source: User correction on 2026-05-12 during ENG-544 adversarial review. See `memory/feedback_review_scope_and_real_repro.md` (updated 2026-05-12).
+<!-- Kaizen: 2026-06-10 — MCP tool-name + org sweep (Fable audit Tier 2') -->
+- Updated stale MCP tool names to the current environment (ClickHouse run_select_query → run_query; Sentry sentry_list_projects → find_projects, sentry_list_issues → search_issues, sentry_get_issue → get_sentry_resource, sentry_get_issue_events → search_issue_events; Rails console → execute_ruby; OpenSearch cluster_health → ClusterHealthTool, search → SearchIndexTool).
+- Fixed GitHub org: playbypoint → PlaybyCourt (search_issues q strings and list_issue_events/create_issue owners).
 
 <!-- Kaizen: 2026-06-10 — Fix iteration circuit breaker (obra/superpowers MIT, commit 6fd4507) -->
 - Added: "Fix Iteration Circuit Breaker" section placed immediately before "Why ClickHouse First?" — within the main debugging workflow, before the tool-routing deep-dives. Source: superpowers `skills/systematic-debugging/SKILL.md` lines 192-213 (Phase 4, steps 4-5: after 3 failed fix attempts STOP and question the architecture/diagnosis). PBP adaptation: (1) "re-read `investigations/<TICKET>/`" replaces the generic "question fundamentals" directive; (2) no-suppositions rule (≥2 independent sources) is woven in as the proof standard; (3) CORE-624 cited as the concrete precedent (guessed user_affiliations, then "server-side cache", both wrong — exactly this failure). Human-partner signal detection (source lines 234-243) and debug rationalization table (lines 245-256) omitted: the PBP debug skill's Phase 1 and "prove root cause" rules already cover that surface; lean graft only.
