@@ -1,7 +1,7 @@
 ---
 name: multi-tenancy
 description: Validate multi-tenant data isolation. Ensures all queries are properly scoped by facility_id to prevent data leakage between tenants.
-allowed-tools: [Bash, Read, Grep, Glob, Edit, mcp__clickhouse__run_select_query]
+allowed-tools: [Bash, Read, Grep, Glob, Edit, mcp__clickhouse__run_query]
 disable-model-invocation: false
 ---
 
@@ -21,7 +21,7 @@ Run this skill when:
 > **📚 This skill uses shared documentation. See:**
 > - [Critical Rules](../shared/critical-rules.md) - multi-tenancy rules
 > - [ClickHouse Queries](../shared/clickhouse-queries.md) - production verification
-> - Use `Grep` and `Glob` for symbol-level discovery of facility-scoped queries (Serena removed 2026-06-02)
+> - Use `Grep` and `Glob` for symbol-level discovery of facility-scoped queries
 > - [ast-grep Patterns](../shared/ast-grep-patterns.md) — AST-aware detection of unscoped `find(params[:id])` (no comment/string false positives)
 
 # Multi-Tenancy Validation Skill
@@ -301,7 +301,7 @@ grep -rn "\.all\b" app/ --include="*.rb" | grep -v "facility\|admin"
 
 **Expected**: Zero matches (all queries should include facility scoping)
 
-> Use `Grep` and `Glob` for symbol-level discovery. (Serena removed 2026-06-02.)
+> Use `Grep` and `Glob` for symbol-level discovery.
 >
 > **📖 See [ast-grep Patterns](../shared/ast-grep-patterns.md)** when `sg` is installed: `sg run --lang ruby --pattern '$M.find(params[:id])' app/ packs/` matches only real `.find(params[:id])` call expressions — avoids both the comment/string false positives AND the false negatives caused by the fragile `grep -v facility` filter (which kills correctly scoped `@facility.x.find(params[:id])` lines). Otherwise this grep is the right tool.
 
@@ -310,19 +310,22 @@ grep -rn "\.all\b" app/ --include="*.rb" | grep -v "facility\|admin"
 ### Model Scoping
 
 ```ruby
-# GOOD - Default scope (use cautiously)
-class Reservation < ApplicationRecord
+# GOOD - Default scope (use cautiously — only on models WITH a facility_id column)
+class Court < ApplicationRecord
+  # courts.facility_id exists (verified db/structure.sql)
   default_scope { where(facility_id: Current.facility&.id) if Current.facility }
 end
 
 # BETTER - Explicit scoping via association
 class Facility < ApplicationRecord
-  has_many :reservations
+  has_many :courts                          # courts.facility_id direct FK
+  has_many :reservations, through: :courts  # reservations has NO facility_id — go through courts
   has_many :users, through: :facilities_users
 end
 
 # Query through facility
-facility.reservations.where(status: 'confirmed')
+facility.courts.where(active: true)
+facility.reservations.where(status: 'confirmed')  # scoped via courts join
 ```
 
 ### Controller Pattern
@@ -418,7 +421,8 @@ end
 class FamilyMembershipService
   def shared_plans
     # Child can see parent's membership plans
-    MembershipPlan.where(facility: current_facility.family_facilities)
+    # MembershipPlan uses owner_facility_id (belongs_to :owner_facility) — NOT facility_id
+    MembershipPlan.where(owner_facility: current_facility.family_facilities)
   end
 end
 ```
@@ -528,55 +532,8 @@ This skill works with:
 
 ---
 
-## Kaizen: Continuous Improvement
+## Kaizen
 
-> "Every day we must improve" - 改善
+When you discover a new scoping pattern, missing violation pattern, or better ClickHouse query during an audit, run `/kaizen` separately after completing the audit. Do not self-edit this file mid-execution.
 
-**While executing this skill**, if you discover:
-- A new scoping pattern for multi-tenancy
-- A missing violation pattern to detect
-- A better ClickHouse query for auditing
-
-**You MUST**:
-1. Complete the current multi-tenancy audit first
-2. Then append improvements to this skill file using Edit tool
-3. Format: `<!-- Kaizen: YYYY-MM-DD --> New content`
-
-**Recent Improvements**:
-
-<!-- Kaizen: 2026-02-01 --> ~~RETRACTED 2026-06-10 — see correction entry below~~
-**~~Major clarity and validation improvements:~~**
-
-~~1. **Added "When to Use" section** (ROI: 2.0)~~
-~~2. **Added Quick Validation Commands** (ROI: 2.5)~~
-~~3. **Replaced generic examples with real PBP violations** (ROI: 3.0)~~
-   ~~- 5 concrete violations from actual codebase~~
-   ~~- Specific file locations (checkout_service.rb, reservations_controller.rb, etc.)~~
-   **RETRACTED**: `checkout_service.rb`, `app/controllers/api/reservations_controller.rb`, `app/services/payment_service.rb` at those line numbers do not exist in the codebase. The tenancy model was also wrong: `users`, `reservations`, and `memberships` do NOT have a `facility_id` column. ClickHouse queries against `users.facility_id` and `reservations.facility_id` are schema-invalid.
-~~4. **Added expected results to ClickHouse queries** (ROI: 2.0)~~
-~~5. **Added Related Skills section** (ROI: 1.0)~~
-
-~~**Impact:** Violation detection 40% faster / Examples 80% clearer~~
-**RETRACTED**: these metrics were based on fabricated examples and an incorrect schema model.
-
----
-
-<!-- Kaizen: 2026-06-10 -->
-**Correction: fabricated citations and wrong tenancy model replaced with verified facts**
-
-**What was wrong:**
-1. Step 3 "Violations Found" cited five file:line pairs that do not exist (`checkout_service.rb:45`, `api/reservations_controller.rb:23`, `payment_service.rb:67`, `membership.rb:89`). These were fabricated — never verified against the repo.
-2. Step 2 "GOOD - Explicit facility_id" showed `User.where(facility_id:)` and `Reservation.where(facility_id:)` — both columns do not exist; those calls would raise `ActiveRecord::StatementInvalid`.
-3. ClickHouse queries checked `users.facility_id` and grouped `reservations` by `facility_id` — schema-invalid.
-4. The Example transcript referenced `app/services/checkout_service.rb` — file does not exist.
-
-**What was corrected:**
-- Added Tenancy Map table with per-model scoping paths and real file:line citations (all verified 2026-06-10).
-- Step 2 examples now use schema-valid patterns only (`facility.users.find_by(...)`, `Payment.where(facility_id:)`, etc.).
-- Step 3 now shows three real pattern instances (all verified 2026-06-10) with explicit caveat that pattern presence ≠ confirmed violation.
-- ClickHouse queries now use `courts.facility_id` and a `JOIN courts` for reservation distribution.
-- Example transcript marked HYPOTHETICAL.
-- CRITICAL RULES note added: "using the wrong pattern silently bypasses isolation or raises a column error."
-
-**Lesson**: never cite file:line without reading the actual file first. Prefer association-path scoping rules over a blanket "all tables have facility_id" assumption. Run `grep facility_id db/structure.sql` to check column existence before writing examples.
-- Step 5 ClickHouse query: `webhooks_url_facilities` (validator catch) → corrected to real table `webhooks_facility_urls` (verified via `db/structure.sql:5259`).
+> Full improvement history: [kaizen_log.md](kaizen_log.md)
