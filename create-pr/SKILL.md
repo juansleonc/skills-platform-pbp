@@ -86,7 +86,11 @@ git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || echo "not-pu
 git push -u origin $(git branch --show-current)
 
 # Create PR
-gh pr create --base develop --title "TICKET | Description" --body "$(cat <<'EOF'
+gh pr create --base develop \
+  --title "TICKET | EMOJI type(scope): Description" \
+  --assignee juansleonc \
+  --label "ready for review" \
+  --body "$(cat <<'EOF'
 ## Summary
 ...
 EOF
@@ -96,11 +100,11 @@ EOF
 ## Rules
 
 - Base branch is `develop` (not `master`)
-- Title format: `TICKET | Short description`
+- Title format: `TICKET | EMOJI type(scope): Short description` (gitmoji required — CLAUDE.local.md rule #14)
 - Extract ticket from branch name (e.g., `CORE-121`)
 - NEVER push without user confirmation
 - Include all commits in summary, not just the latest
-- Run `bin/d pronto run -c develop` for modified files (preserves legacy)
+- Run `bin/d bundle exec pronto run -r rubocop -c develop -f text` for modified files (preserves legacy)
 - Run `bin/d rubocop -A` ONLY for new files
 
 ## Example
@@ -109,7 +113,11 @@ EOF
 # User runs: /create-pr
 
 # Claude gathers info, then:
-gh pr create --base develop --title "CORE-121 | feat(onboarding): Move hasCompleteProfile to userOnboardingStatus" --body "$(cat <<'EOF'
+gh pr create --base develop \
+  --title "CORE-121 | ✨ feat(onboarding): Move hasCompleteProfile to userOnboardingStatus" \
+  --assignee juansleonc \
+  --label "ready for review" \
+  --body "$(cat <<'EOF'
 **Background**
 
 Mobile app needs to track user onboarding progress more efficiently. Currently, profile completion is computed on every request which impacts performance.
@@ -146,32 +154,28 @@ Use for enhanced PR operations:
 ```
 # Create PR via MCP (alternative to gh CLI)
 mcp__github__create_pull_request:
-  owner: "playbypoint"
+  owner: "PlaybyCourt"
   repo: "platform"
-  title: "PLA-123 | Add feature X"
+  title: "PLA-123 | ✨ feat(scope): Add feature X"
   body: "## Summary\n..."
   head: "feature/add-x"
   base: "develop"
 
 # List existing PRs to avoid duplicates
 mcp__github__list_pull_requests:
-  owner: "playbypoint"
+  owner: "PlaybyCourt"
   repo: "platform"
   state: "open"
   head: "feature/add-x"
 
 # Get PR review status
 mcp__github__get_pull_request:
-  owner: "playbypoint"
+  owner: "PlaybyCourt"
   repo: "platform"
   pull_number: 123
 
-# Add reviewers
-mcp__github__request_reviewers:
-  owner: "playbypoint"
-  repo: "platform"
-  pull_number: 123
-  reviewers: ["reviewer1", "reviewer2"]
+# Add reviewers — mcp__github__request_reviewers does not exist; use gh CLI instead:
+# gh pr edit <number> --add-reviewer reviewer1,reviewer2
 ```
 
 **Use Cases:**
@@ -184,29 +188,6 @@ mcp__github__request_reviewers:
 
 ## Kaizen: Continuous Improvement
 
-> "Every day we must improve" - 改善
+> Improvements log archived to [`kaizen_log.md`](kaizen_log.md) (2026-06-14) to reduce per-invocation token cost.
 
-**While executing this skill**, if you discover:
-- A new PR template pattern
-- A missing validation step
-- An outdated gh CLI usage
-
-**You MUST**:
-1. Complete the current PR creation first
-2. Then append improvements to this skill file using Edit tool
-3. Format: `<!-- Kaizen: YYYY-MM-DD --> New content`
-
-**Recent Improvements**:
-<!-- Kaizen entries will be added here -->
-
-<!-- Kaizen: 2026-05-12 - User correction -->
-- Rule: Default every PR creation to `--assignee juansleonc --label "ready for review"`. Surface both fields in the pre-push confirmation block (alongside title/base/body), not only in the executed command.
-- Why: Standard workflow — every PR needs an owner and a status. Omitting them forces the user to ask twice and re-edit the PR after creation.
-- How to apply: When building the `gh pr create` invocation (and any MCP `create_pull_request` call), always include the assignee and `ready for review` label. Show them in the user-facing proposal. If the user explicitly opts out for a specific PR, respect that for that PR but keep the default for the next one.
-- Source: User correction on 2026-05-12 during TRI-74 (PR #4836). See `memory/feedback_pr_defaults.md`.
-
-<!-- Kaizen: 2026-05-14 - User correction -->
-- Rule: When the source Jira ticket has visual repro artifacts (Loom, video, screenshots, GIFs), include each one as a separate bullet under **Reference** in the PR body — not just the JIRA link.
-- Why: Reviewers should see the bug repro one click away from the PR. Forcing them to open the ticket to find the video adds friction and risks them reviewing code without seeing the actual user-visible behavior.
-- How to apply: After reading the Jira ticket, scan description AND comments for `loom.com`, `youtube.com`, image attachments, and screenshot URLs. Add a bullet per artifact under **Reference** with a short descriptive label, e.g. `[Loom — bug repro](https://www.loom.com/share/...)`. Apply to every PR, not only bug fixes — feature PRs often have design mockups worth surfacing.
-- Source: User correction on 2026-05-14 during TRI-79. See `memory/feedback_pr_include_repro_links.md`.
+When you discover a new PR pattern, missing validation step, or outdated gh CLI usage: complete the current PR first, then run `/kaizen` to record the improvement.
