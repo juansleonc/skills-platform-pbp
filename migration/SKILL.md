@@ -1,7 +1,7 @@
 ---
 name: migration
 description: Validates database migrations for safety, rollback capability, index optimization, and production impact. Prevents data loss and downtime.
-allowed-tools: [Bash, Read, Grep, Glob, Edit, mcp__clickhouse__run_select_query, mcp__clickhouse__list_tables]
+allowed-tools: [Bash, Read, Grep, Glob, Edit, mcp__clickhouse__run_query, mcp__clickhouse__list_tables]
 disable-model-invocation: false
 ---
 
@@ -9,14 +9,14 @@ disable-model-invocation: false
 
 # Database Migration Safety Skill
 
-Validates migrations for safety with **852+ existing migrations**. Prevents data loss, downtime, and production issues.
+Validates migrations for safety with **1029+ existing migrations** (935 main + 94 packs). Prevents data loss, downtime, and production issues.
 
 ## CRITICAL RULES
 
 1. **ALWAYS reversible** - Must have `down` method or use `change`
 2. **NEVER drop columns without backup** - Data loss is permanent
 3. **ALWAYS add indexes** for foreign keys and frequently queried columns
-4. **NEVER lock large tables** without `algorithm: :concurrently`
+4. **MySQL 8.0/InnoDB (this codebase):** `ADD INDEX` is online by default (ALGORITHM=INPLACE, LOCK=NONE) — plain `add_index` is non-blocking for reads/writes in most cases. The real locking danger is ALGORITHM=COPY operations: changing column type, charset/collation, or reordering columns on large tables. Use `pt-online-schema-change`/`gh-ost` or coordinate a maintenance window for those.
 5. **ALWAYS set defaults** for NOT NULL columns
 
 ## Audit Process
@@ -68,27 +68,40 @@ grep -rn "drop_table\|remove_column\|execute" db/migrate/*.rb | grep -v "def dow
 
 ### Step 3: Check Index Safety
 
-```ruby
-# ✅ GOOD - Concurrent index (no lock)
-class AddIndexToUsers < ActiveRecord::Migration[6.1]
-  disable_ddl_transaction!
+**MySQL 8.0/InnoDB (this codebase):** `ADD INDEX` runs online by default (ALGORITHM=INPLACE, LOCK=NONE), meaning it does NOT block reads or writes for standard `add_index` calls. The PostgreSQL-specific options `algorithm: :concurrently` and `disable_ddl_transaction!` are **not valid on MySQL** — they raise `ArgumentError` and must never be used here.
 
+```ruby
+# ✅ GOOD - Plain add_index is online/non-blocking on MySQL 8.0 InnoDB
+class AddIndexToUsers < ActiveRecord::Migration[6.1]
   def change
-    add_index :users, :email, algorithm: :concurrently
+    add_index :users, :email
   end
 end
 
-# ❌ BAD - Locks table during index creation
+# ❌ BAD - PostgreSQL-only; raises ArgumentError on MySQL (mysql2 gem)
 class AddIndexToUsers < ActiveRecord::Migration[6.1]
+  disable_ddl_transaction!  # NO-OP at best, error at worst on MySQL
+
   def change
-    add_index :users, :email  # Locks users table!
+    add_index :users, :email, algorithm: :concurrently  # ArgumentError on MySQL!
   end
 end
 ```
 
+**Real locking risks on MySQL 8.0 InnoDB (ALGORITHM=COPY — needs care on large tables):**
+- Changing a column's data type (e.g. `change_column :t, :c, :text` → `:mediumtext`)
+- Changing charset or collation on a column or table
+- Reordering columns
+- Adding a column with a non-metadata-only default on older MySQL versions
+
+For these operations on large tables (millions of rows), consider:
+- `pt-online-schema-change` (Percona) or `gh-ost` (GitHub) for zero-downtime ALTERs
+- Coordinating a low-traffic maintenance window
+- Check `ALGORITHM=INPLACE` compatibility in the [MySQL 8.0 online DDL docs](https://dev.mysql.com/doc/refman/8.0/en/innodb-online-ddl-operations.html) before running
+
 ```bash
-# Find indexes without concurrent
-grep -rn "add_index" db/migrate/*.rb | grep -v "concurrently\|algorithm:"
+# Find column type or charset changes that may trigger ALGORITHM=COPY
+grep -rn "change_column\|change_column_default" db/migrate/*.rb
 ```
 
 ### Step 4: Check NULL Safety
@@ -271,7 +284,8 @@ end
 
 - [ ] Reversible (has down method or uses change)
 - [ ] Indexes added for foreign keys
-- [ ] Indexes use `algorithm: :concurrently` for large tables
+- [ ] MySQL 8.0/InnoDB: plain `add_index` is online — no `algorithm: :concurrently` needed (raises ArgumentError on MySQL)
+- [ ] Column type/charset/collation changes on large tables use `pt-online-schema-change`/`gh-ost` or maintenance window (ALGORITHM=COPY risk)
 - [ ] NOT NULL columns have default values
 - [ ] Large table updates use batching
 - [ ] Package tables use correct prefix
@@ -292,7 +306,7 @@ end
 | Migration | Issue | Risk | Fix |
 |-----------|-------|------|-----|
 | 20240120_add_status.rb | NOT NULL without default | HIGH | Add default value |
-| 20240121_add_index.rb | Missing concurrent | MEDIUM | Add algorithm: :concurrently |
+| 20240121_change_column.rb | Column type change on large table (ALGORITHM=COPY) | MEDIUM | Use pt-online-schema-change or maintenance window |
 
 ### Table Impact Analysis
 
@@ -335,48 +349,30 @@ Users table: 2.5M rows, 1.2GB
 
 ### Issues Found
 
-⚠️ WARNING: Index creation without concurrent
-- Table has 2.5M rows
-- Will lock table during index creation
-- Fix: Add `algorithm: :concurrently` and `disable_ddl_transaction!`
+✅ NOTE: Index creation on 2.5M-row table
+- MySQL 8.0/InnoDB: `add_index` runs ALGORITHM=INPLACE, LOCK=NONE by default — non-blocking for reads/writes.
+- No changes needed for index creation specifically.
+- The `algorithm: :concurrently` + `disable_ddl_transaction!` pattern is **PostgreSQL-only** and raises `ArgumentError` on this MySQL codebase — do NOT apply it.
 
-### Suggested Fix
+### Verified Safe (MySQL 8.0/InnoDB)
 
 ```ruby
+# ✅ Correct for this MySQL 8.0 codebase — online DDL, no table lock
 class AddVerifiedToUsers < ActiveRecord::Migration[6.1]
-  disable_ddl_transaction!
-
   def change
     add_column :users, :verified, :boolean, null: false, default: false
-    add_index :users, :verified, algorithm: :concurrently
+    add_index :users, :verified
   end
 end
 ```
 
-### Result: NEEDS FIX before merge
+### Result: SAFE to merge (MySQL 8.0/InnoDB online DDL confirmed)
 ```
 
 ---
 
-## Kaizen: Continuous Improvement
+## Continuous Improvement
 
-> "Every day we must improve" - 改善
+If you discover a new migration safety pattern, missing check, or better ClickHouse query while executing this skill: complete the audit first, then run `/kaizen`. Do NOT self-edit this file mid-execution.
 
-**While executing this skill**, if you discover:
-- A new migration safety pattern
-- A missing validation check
-- A better ClickHouse query for analysis
-
-**You MUST**:
-1. Complete the current migration audit first
-2. Then append improvements to this skill file using Edit tool
-3. Format: `<!-- Kaizen: YYYY-MM-DD --> New content`
-
-**Recent Improvements**:
-<!-- Kaizen entries will be added here -->
-
-<!-- Kaizen: 2026-05-22 - User correction -->
-- Rule: Respect approved scope before a migration/data change makes a destructive step (DELETE/cleanup) a default/enforced action — never institutionalize a step the ticket marked out-of-scope. Approval of X (e.g. links) ≠ approval to delete other tables.
-- Why: In CORE-624 I nearly enforced faves/user_stats deletion alongside the link cleanup; the user caught that Erick had scoped those tables out — the exact scope creep (L3) the TRIAGE-10 lessons doc flags.
-- How to apply: Before a data migration deletes from a table by default, re-read the approval record ("Out of scope / Pendiente / cleanup separado"). If out of scope: leave it out or make it strictly opt-in pending separate sign-off. Distinguish integrity consequences of an approved action (touch/reindex) from new destructive ops on other tables.
-- Source: User correction on 2026-05-22. See `memory/feedback_respect_approved_scope.md`.
+> Improvement log: [kaizen_log.md](kaizen_log.md)
