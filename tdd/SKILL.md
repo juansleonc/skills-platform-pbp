@@ -5,18 +5,18 @@ allowed-tools: [Bash, Read, Write, Edit, Grep, Glob, Agent, mcp__context7__resol
 disable-model-invocation: false
 ---
 
-> **📋 Config Priority**: `CLAUDE.local.md` overrides `CLAUDE.md` for local settings (Docker, linting, coverage). Always check both files for current project conventions.
+> **Config Priority**: `CLAUDE.local.md` overrides `CLAUDE.md` for local settings (Docker, linting, coverage). Always check both files for current project conventions.
 
 # TDD Workflow - MANDATORY
 
 ## Shared References
 
-> **📚 This skill uses shared documentation. See:**
-> - [Factory Rules](../shared/factory-rules.md) - build vs create patterns
+> **This skill uses shared documentation. See:**
+> - [Factory Rules](../shared/factory-rules.md) - build vs create decision tree
 > - [Forbidden Patterns](../shared/forbidden-patterns.md) - patterns to avoid
 > - [Testing Patterns](../shared/testing-patterns.md) - time, Redis, parallel safety
-> - [Critical Rules](../shared/critical-rules.md) - project-wide rules
-> - [Code Simplifier Integration](../shared/code-simplifier-integration.md) - automatic test optimization (Tier 1: ALWAYS)
+> - [Test Templates](../shared/test-templates.md) - unit/integration/RED/HTTP-facing templates
+> - [System Test Guide](../shared/system-test-guide.md) - Playwright setup, helpers, templates
 
 ## CRITICAL RULE
 
@@ -60,85 +60,15 @@ Implement fresh from tests. Period.
 └─────────────────────────────────────────────────────────┘
 ```
 
-## PERFORMANCE IS CRITICAL
-
-**This is a large project. Test execution time matters.**
-
-> 📖 **See [Factory Rules](../shared/factory-rules.md) for complete decision tree.**
-
-Quick reference:
-1. Use `build` over `create` (10-100x faster)
-2. Avoid unnecessary database operations
-3. Mock external services
-4. Use `build_stubbed` when you need `id`/`persisted?`
-
-### Before Writing Tests: Consult Best Practices
-
-**ALWAYS query Context7 for RSpec/testing best practices:**
-
-```
-# Resolve library ID first
-mcp__context7__resolve-library-id:
-  libraryName: "rspec"
-  query: "best practices for fast unit tests"
-
-# Then query documentation
-mcp__context7__query-docs:
-  libraryId: "/rspec/rspec"
-  query: "factory patterns for fast tests, avoiding database hits"
-```
-
-**Query Context7 for specific patterns:**
-- Factory optimization: `"FactoryBot build vs create performance"`
-- Mocking patterns: `"RSpec mocking best practices"`
-- Async testing: `"testing Sidekiq jobs efficiently"`
-- GraphQL testing: `"graphql-ruby testing patterns"`
-
-### After Writing Tests: Simplify with Agent
-
-**ALWAYS run code-simplifier agent on new test files:**
-
-```
-Agent tool with subagent_type: "code-simplifier"
-prompt: "Review and optimize this spec file for performance and clarity:
-  - Prefer build over create
-  - Remove redundant test setup
-  - Consolidate similar contexts
-  - Ensure proper use of let vs let!
-  - Remove unnecessary database operations
-  File: spec/path/to/new_spec.rb"
-```
-
-The code-simplifier agent will:
-- Identify slow patterns (unnecessary `create` calls)
-- Suggest `build`/`build_stubbed` replacements
-- Remove duplicate setup code
-- Optimize factory usage
-- Ensure tests are maintainable
-
-## Test Types
-
-| Type | Location | When to Use |
-|------|----------|-------------|
-| Unit | `spec/models/`, `spec/services/` | Models, services, isolated logic |
-| Integration | `spec/requests/`, `spec/graphql/` | API endpoints, GraphQL |
-| System | `system_specs/` (NOT spec/) | Browser interactions (Playwright) |
-
 ## Docker Environment (MANDATORY)
 
-**All tests run in Docker web container:**
+All tests run in Docker web container:
 
 ```bash
-# Unit/Integration tests (PREFERRED)
-make test TEST_PATH=spec/models/user_spec.rb
-# OR: bin/d rspec spec/models/user_spec.rb
-
-# Multiple files
-make test TEST_PATH="spec/models/user_spec.rb spec/services/"
-
-# All specs (parallel) - PREFERRED
-make test-all
-# OR: bin/d rails parallel:spec
+bin/d rspec spec/models/user_spec.rb         # single file
+make test TEST_PATH=spec/models/user_spec.rb  # via Makefile (accepts TEST_PATH variable)
+bin/d rails parallel:spec                     # full suite (parallel) — PREFERRED
+# Note: make test-all does NOT exist in the Makefile
 ```
 
 ## Workflow
@@ -150,43 +80,20 @@ Before writing anything:
 2. Define inputs and outputs
 3. List edge cases and error conditions
 
+**HTTP-facing classification (mandatory):** Ask — "Is this code reached via HTTP?" (GraphQL resolver / controller / middleware / webhook / endpoint-triggered job). If **yes**, the RED test in Step 2 MUST exercise the real entry point — not a unit test that stubs the framework or calls private methods on an `.allocate`d object. See [../shared/test-templates.md](../shared/test-templates.md) for the HTTP-facing integration template.
+
+### Before Writing Tests: Consult Best Practices
+
+**ALWAYS query Context7 for RSpec/testing best practices** before writing tests. Use `mcp__context7__resolve-library-id` to find the library ID for "rspec", then call `mcp__context7__query-docs` with that ID to look up patterns relevant to your test. Useful queries:
+
+- Factory optimization: `"FactoryBot build vs create performance"`
+- Mocking patterns: `"RSpec mocking best practices"`
+- Async testing: `"testing Sidekiq jobs efficiently"`
+- GraphQL testing: `"graphql-ruby testing patterns"`
+
 ### Step 2: Write the Test (RED)
 
-```ruby
-# frozen_string_literal: true
-
-require 'rails_helper'
-
-RSpec.describe NewFeature do
-  describe '#expected_behavior' do
-    subject(:result) { described_class.call(input) }
-
-    context 'when happy path' do
-      let(:input) { valid_input }
-
-      it 'returns expected output' do
-        expect(result).to eq(expected_output)
-      end
-    end
-
-    context 'when edge case' do
-      let(:input) { edge_case_input }
-
-      it 'handles edge case correctly' do
-        expect(result).to handle_edge_case
-      end
-    end
-
-    context 'when error condition' do
-      let(:input) { invalid_input }
-
-      it 'raises appropriate error' do
-        expect { result }.to raise_error(ExpectedError)
-      end
-    end
-  end
-end
-```
+See [../shared/test-templates.md](../shared/test-templates.md) for unit, integration, and RED templates.
 
 Run the test — it MUST fail. **Do not assume it fails. Run it and READ the full output.**
 ```bash
@@ -194,6 +101,18 @@ bin/d rspec spec/path_spec.rb
 # Expected: RED — confirm the failure message says the FEATURE IS MISSING,
 # not a load error, typo, or misconfigured factory. A load error is not a RED test.
 ```
+
+#### Assertion-Depth gate (anti coverage-theater)
+
+For every assertion ask: "Does this prove the BEHAVIOR or just that the code ran?"
+
+| Weak (coverage-theater) | Strong (behavioral) |
+|-------------------------|---------------------|
+| `expect { x }.not_to raise_error` as the SOLE assertion | `expect(result).to eq(expected_value)` |
+| `expect(record.destroy).to be_truthy` | `expect { record.destroy }.to change(Model, :count).by(-1)` |
+| Verifies call happened | Verifies side-effect: `expect(record.reload).to be_destroyed` |
+
+**100% line coverage ≠ behavioral coverage.** Lines executed without assertions about their output are untested.
 
 #### Common Rationalizations — Intercept Before Skipping the Test
 
@@ -267,56 +186,30 @@ make test TEST_PATH=spec/path_spec.rb
 # Must stay GREEN after each change
 ```
 
+After refactoring tests, use `/factory-check` and [../shared/factory-rules.md](../shared/factory-rules.md) to optimize factory usage (build > build_stubbed > create).
+
 ### Step 4.5: Lint Changed Files (BEFORE git add)
 
 **CRITICAL**: Run Pronto BEFORE staging files to catch issues early.
 
-⚠️ **Pronto only works on UNSTAGED files.** Run this BEFORE `git add`.
+Pronto only works on UNSTAGED files. Run this BEFORE `git add`.
 
 ```bash
-# Run Pronto on unstaged changes
 bin/d bundle exec pronto run -r rubocop -c develop -f text
 ```
 
-**Expected output**: No violations (empty output)
+**Expected output**: No violations (empty output). Fix all violations, re-run until clean.
 
-**If violations found**:
-1. Fix all violations (Layout, Style, Rails cops)
-2. Re-run Pronto until clean
-3. Only then proceed to coverage/commit
-
-**Why this step**:
-- Pre-commit hook catches issues AFTER `git add` (too late)
-- Pronto catches issues BEFORE staging (prevents rejection)
-- Saves 15min per PR by catching early
-
-**Common violations caught**:
-- `Layout/ArgumentAlignment` - Fix indentation
-- `Rails/Delegate` - Use `delegate` instead of wrapper methods
-- `Naming/PredicatePrefix` - Rename `is_foo` to `foo`
-- `Style/InvertibleUnlessCondition` - Use `if x.blank?` instead of `unless x.present?`
+**Common violations caught**: `Layout/ArgumentAlignment`, `Rails/Delegate`, `Naming/PredicatePrefix`, `Style/InvertibleUnlessCondition`.
 
 ### Step 5: Verify Coverage (MANDATORY)
 
-**100% coverage on changed lines is required:**
+100% coverage on changed lines is required. See `/coverage` skill for full rake walkthrough.
 
-```bash
-# Run with SimpleCov
-docker compose exec -e SIMPLECOV_REPORT=true web bundle exec rspec spec/path_spec.rb  # bin/d rspec for plain run
-
-# Check coverage for specific file
-bin/d rake 'coverage:local:file[app/path/to/file.rb]'
-
-# Verify delta
-bin/d rake 'coverage:local:delta'
-```
-
-**Evidence gate before declaring done (two net-new items — tests/lint/coverage are already covered above):**
+**Evidence gate before declaring done:**
 
 1. **VCS diff check** — run `git diff HEAD` and confirm the claimed changes are actually present in the diff. Do not declare a file changed if it does not appear.
 2. **Contract reconciliation** — go through the validation contracts (C1..Cn) one by one and confirm each has a passing test. Don't assume — trace each contract to its spec line.
-
-Everything else (tests pass, lint clean, coverage 100%) is already enforced by the steps above and `/coverage` + Pronto.
 
 **No completion claim without fresh verification evidence.** You cannot use success/satisfaction wording unless the verifying command was actually run in this message:
 
@@ -327,241 +220,74 @@ Everything else (tests pass, lint clean, coverage 100%) is already enforced by t
 | "Agent/worker completed" | VCS diff shows the changes | Worker's self-report of success |
 | "Linter clean" | Pronto output (empty = clean) | "I fixed all the violations" |
 | "Bug is fixed" | Test exercising original symptom passes | Code changed, assumed fixed |
-| "Regression test guards the bug" | Red-green cycle verified (see regression proof above, in the RED phase) | Test was written and passes once |
+| "Regression test guards the bug" | Red-green cycle verified (see regression proof above) | Test was written and passes once |
 
 Red flags — STOP before claiming done:
 - Using "should", "probably", "seems to"
 - Expressing satisfaction ("Done!", "Perfect!", "Should work") before running the command
 - Trusting a subagent/worker's success report without checking the diff
 
-## Factory Rules (CRITICAL for Performance)
+## Anti-Patterns
 
-> 📖 **See [Factory Rules](../shared/factory-rules.md) for complete decision tree and examples.**
+### Anti-over-mocking
 
-**⚠️ WRONG factory choice = slow test suite = wasted CI time**
+Mock only DEPENDENCIES, never the unit under test. If you're stubbing a method on `described_class` or its own instance, that is a smell — inject the dependency or test at integration level.
 
-| Method | When to Use | Speed |
-|--------|-------------|-------|
-| `build(:factory)` | **DEFAULT** - validations, methods, attributes | Fast |
-| `build_stubbed(:factory)` | When code checks `id` or `persisted?` | Fast |
-| `create(:factory)` | **ONLY** scopes, queries, uniqueness | Slow |
-| `create(:facility, :skip_callbacks)` | Facility without associations | Medium |
+This is sharper than the `allow_any_instance_of` ban (see [../shared/forbidden-patterns.md](../shared/forbidden-patterns.md)): even `allow_any_instance_of` on a collaborator is wrong; stubbing the subject itself is doubly wrong.
 
-**Quick Rule**: If you're testing a method or validation, use `build`. Only use `create` when you need database operations.
+### Flaky-Test Triage
 
-## Forbidden Patterns
+RED is not proven if the test is flaky. Quick decision tree:
 
-> 📖 **See [Forbidden Patterns](../shared/forbidden-patterns.md) for complete list.**
+- Passes 10x locally but fails in parallel? → `before(:each)` not `before(:all)`, `SecureRandom` uniqueness
+- Time-of-day failures? → `Timecop.freeze(Time.current)`
+- Redis state leaking? → `Redis.current.flushdb` in `before` — see [../shared/testing-patterns.md](../shared/testing-patterns.md)
+- Order-dependent failures?
 
-These will cause validation failures:
-
-```ruby
-# ❌ FORBIDDEN - These WILL fail validation
-allow_any_instance_of(Class)    # Use dependency injection
-expect_any_instance_of(Class)   # Use explicit instances
-create(:user, id: 1)            # Let factory generate ID
-Time.now / Date.today           # Use Time.current / Date.current
-before(:all) { create(...) }    # Use before(:each)
-date.to_s(:db)                  # Use strftime (Ruby 3)
+```bash
+bin/d rspec <spec> --bisect --seed <failing-seed>
+# bisect only does work when a failure is present
 ```
 
-## Time-Dependent Tests
+- Slowest examples:
 
-> 📖 **See [Testing Patterns](../shared/testing-patterns.md) for complete patterns.**
-
-**ALWAYS use Timecop with Time.current:**
-
-```ruby
-# ✅ CORRECT
-Timecop.freeze(Time.current) do
-  user = build(:user)
-  expect(user.expires_at).to eq(30.days.from_now)
-end
-
-# ❌ INCORRECT - will fail randomly
-expect(user.expires_at).to eq(Time.now + 30.days)
+```bash
+bin/d rspec <spec> --profile 5
 ```
 
-## Redis in Tests
+- CI flake quarantine: `rspec-retry` is INSTALLED but DISABLED — requires uncommenting `require 'rspec/retry'` and `config.default_retry_count` in `spec_helper.rb`. The env var is NOT forwarded by `bin/d`, so run as:
 
-**Clear Redis for rate limiting/caching tests:**
-
-```ruby
-before do
-  Redis.current.flushdb
-  # Or for specific keys:
-  Rails.cache.clear
-end
+```bash
+docker compose exec -e RAILS_ENV=test -e RSPEC_RETRY_COUNT=3 web bundle exec rspec <spec>
 ```
 
-## Test Structure Template
+Document as "requires enabling config first" — it is NOT a one-liner drop-in.
 
-```ruby
-# frozen_string_literal: true
+- Factory overuse slowing tests?
 
-require 'rails_helper'
-
-RSpec.describe ClassName do
-  # Subject first
-  subject(:result) { described_class.new(args).method_name }
-
-  # Then lets (dependencies)
-  let(:facility) { create(:facility, :skip_callbacks) }
-  let(:dependency) { build(:factory) }
-  let(:args) { { key: value } }
-
-  # Then contexts with examples
-  describe '#method_name' do
-    context 'when condition A' do
-      it 'behaves as expected' do
-        expect(result).to eq(expected)
-      end
-    end
-
-    context 'when condition B' do
-      let(:args) { { key: different_value } }
-
-      it 'behaves differently' do
-        expect(result).to eq(different_expected)
-      end
-    end
-  end
-end
+```bash
+docker compose exec -e RAILS_ENV=test -e FPROF=1 web bundle exec rspec <spec>
+# FPROF=flamegraph for a visual call-graph
+# Note: bin/d does not forward env vars; use docker compose exec directly
 ```
 
----
+### Characterization Tests for Untested Legacy
+
+When the delete-and-reimplement protocol is too risky (payment/state-machine code with >~200 lines and no tests), write tests that CAPTURE current behavior first (not asserting it's correct), then refactor green, then correct. Trigger `/code-smells` before attempting a large legacy refactor.
+
+### Mutation Testing (note only)
+
+`mutant`/`mutest` are NOT in the Gemfile. Mutation testing would prove tests catch bugs beyond coverage %, but adding the gem is out of scope and needs a separate sign-off. Do NOT treat mutation testing as mandatory while the gem is absent.
+
+## Test Types
+
+Unit (`spec/models/`, `spec/services/`), Integration (`spec/requests/`, `spec/graphql/`), System (`system_specs/` — Playwright). See [../shared/test-templates.md](../shared/test-templates.md) and [../shared/system-test-guide.md](../shared/system-test-guide.md).
 
 ## System Tests (Playwright)
 
-**System tests live in `system_specs/` (NOT `spec/`).**
+System tests live in `system_specs/` (NOT `spec/`). Full guide: [../shared/system-test-guide.md](../shared/system-test-guide.md).
 
-### Playwright Version (CRITICAL)
-
-**Version MUST match between gem and CLI:**
-
-```bash
-# Check current Playwright version in Gemfile.lock
-grep "capybara-playwright-driver" Gemfile.lock
-
-# Install matching CLI version
-npx --yes playwright@1.55.0 install chromium
-```
-
-### Running System Tests
-
-```bash
-# Setup Playwright (version must match!)
-npx --yes playwright@1.55.0 install chromium
-
-# Run all system tests
-bin/test_system
-
-# Parallel execution
-PARALLEL_TEST_PROCESSORS=4 bin/test_system
-
-# Visible browser (debugging)
-PLAYWRIGHT_HEADLESS=false bin/test_system
-
-# Single test
-bin/d rspec system_specs/features/admin_login_spec.rb
-```
-
-### System Test File Structure
-
-```ruby
-# frozen_string_literal: true
-require_relative '../system_rails_helper'
-
-RSpec.describe 'Feature Name', type: :system, playwright: true do
-  # Test content
-end
-```
-
-### Multi-Tenant Setup
-
-```ruby
-# Always create unique emails with SecureRandom
-let(:admin_user) do
-  FactoryBot.create(
-    :user,
-    :admin,
-    email: "admin_#{SecureRandom.hex(4)}@example.com",
-    password: password,
-    confirmed_at: Time.current
-  ).tap do |u|
-    FacilitiesUser.create!(user: u, facility: facility, role: 'court_manager', approval: true)
-    u.facilities_linked << facility
-  end
-end
-
-# Use visit_as_tenant for subdomain routing
-def login_user(user, subdomain:)
-  visit_as_tenant('/users/sign_in', subdomain: subdomain)
-  fill_in('Email', with: user.email)
-  fill_in('Password', with: password)
-  click_button('Sign in')
-  expect(page).to have_current_path(%r{/admin|/facilities}, wait: 10)
-end
-```
-
-### Available System Test Helpers
-
-```ruby
-include SystemTestHelpers::MultiTenant  # visit_as_tenant, sign_in_user
-include SystemTestHelpers::Waiting      # wait_for_element, wait_for_text, wait_for_ajax
-include SystemTestHelpers::Screenshots  # take_screenshot (auto on failure)
-include SystemTestHelpers::FormHelpers  # fill_in_date_field, select_from_dropdown
-```
-
-### Waiting for Dynamic Content
-
-```ruby
-# Prefer Capybara's built-in waiting
-expect(page).to have_css('selector', wait: 10)
-expect(page).to have_content('text', wait: 10)
-
-# For AJAX/fetch updates
-def wait_for_search_results
-  expect(page).to have_no_css('.loading', wait: 5)
-  expect(page).to have_css('#results-table tbody tr', wait: 10)
-end
-```
-
-### System Test Template
-
-```ruby
-# frozen_string_literal: true
-require_relative '../system_rails_helper'
-
-RSpec.describe 'Admin Login', type: :system, playwright: true do
-  let(:password) { 'password123!' }
-  let(:facility) { FactoryBot.create(:facility, :skip_callbacks) }
-  let(:admin_user) do
-    FactoryBot.create(
-      :user,
-      :admin,
-      email: "admin_#{SecureRandom.hex(4)}@example.com",
-      password: password,
-      confirmed_at: Time.current
-    ).tap do |u|
-      FacilitiesUser.create!(user: u, facility: facility, role: 'court_manager', approval: true)
-    end
-  end
-
-  it 'allows admin to login' do
-    visit_as_tenant('/users/sign_in', subdomain: facility.subdomain)
-
-    fill_in 'Email', with: admin_user.email
-    fill_in 'Password', with: password
-    click_button 'Sign in'
-
-    expect(page).to have_current_path(%r{/admin}, wait: 10)
-    expect(page).to have_content('Dashboard')
-  end
-end
-```
-
----
+Quick summary: version-match gem vs CLI (`grep capybara-playwright-driver Gemfile.lock`), run via `bin/test_system`, use `SecureRandom.hex(4)` in emails, prefer Capybara's built-in `wait:` over `sleep`, auto-screenshots on failure in `tmp/screenshots/playwright/`.
 
 ## Remember
 
@@ -592,10 +318,6 @@ Report what you fixed and what (if anything) you escalated. This is the worker's
 
 ---
 
-## MCP Integrations
-
----
-
 ## Kaizen: Continuous Improvement
 
 > "Every day we must improve" - 改善
@@ -612,40 +334,4 @@ Report what you fixed and what (if anything) you escalated. This is the worker's
 3. Add to the appropriate section (or create new subsection)
 4. Format: `<!-- Kaizen: YYYY-MM-DD --> New content`
 
-**Recent Improvements**:
-<!-- Kaizen: 2026-01-22 -->
-- Added: Context7 integration for RSpec/testing best practices lookup
-- Added: code-simplifier agent workflow for test optimization
-- Added: "PERFORMANCE IS CRITICAL" section emphasizing test speed
-- Enhanced: Factory Rules with decision tree and performance impact examples
-- Added: Test profiling commands to measure slow tests
-- Added: mcp__context7__* tools to allowed-tools
-
-<!-- Kaizen: 2026-02-01 - Docker Command Preferences -->
-- Improved: Docker Environment section to emphasize preferred commands
-- Added: `make test-all` as preferred alternative for parallel specs
-- Added: `bin/d` as alternative to `make test` for single files
-- Why: CLAUDE.local.md prefers `make`/`bin/d` over direct `docker compose exec`
-- Impact: Clearer guidance for developers, consistent with project conventions
-
-<!-- Kaizen: 2026-05-12 - User correction -->
-- Added: For TDD on HTTP-facing code (GraphQL resolvers, controllers, middlewares, endpoint-triggered jobs), the failing test in the RED step should be an INTEGRATION spec that exercises the real entry point (e.g. `graphql_post(query, token, params)` for GraphQL), not a unit spec that stubs the framework or calls private methods on an `allocate`d object.
-- Why: Stubbed/private-method tests pass under conditions that don't hold in production. The aliased-`eventsNearby` context-collision bug in ENG-544 was only catchable via a request-level spec — a unit test on `filter_bookable_for_marketplace` would have hidden it.
-- How to apply: When writing the RED test, ask "would this test still fail if I ran the actual HTTP request through the real stack?" If no, escalate to integration. Unit-level stubs are acceptable for genuinely internal services with no HTTP entry.
-- Source: User correction on 2026-05-12 during ENG-544 adversarial review. See `memory/feedback_validate_bugs_via_real_request.md`.
-
-<!-- Kaizen: 2026-06-09 — RED must actually fail + self-review + evidence gate (adapted from obra/superpowers, MIT) -->
-- RED phase: made "watch it fail" explicit — run `bin/d rspec` and READ the output; confirm the failure is "feature missing", not a load error. "Assume it fails" is not allowed.
-- Self-review checkpoint (Step 5.5, before handoff): 5-axis pass (Completeness / Quality / YAGNI / Testing / Escalation); fixes what it finds; reports what it fixed. Early filter only — the independent validator gate is still mandatory.
-- Evidence gate (Step 5 addendum): two net-new items before declaring done — (i) `git diff HEAD` confirms claimed changes exist; (ii) contract reconciliation traces each C1..Cn to a passing spec line. Tests/lint/coverage checks already enforced by the TDD cycle + `/coverage` + Pronto.
-
-<!-- Kaizen: 2026-06-10 — Mechanism grafts from obra/superpowers (MIT, commit 6fd4507) -->
-- Added: Iron Law / delete-code protocol (§ "If Code Was Written Before Tests") — verbatim from superpowers `skills/test-driven-development/SKILL.md` lines 31-45. The local skill already forbade writing implementation first but prescribed nothing when it had already happened. Protocol: stash/delete untested code → write failing test → reimplement. "Delete means delete."
-- Added: Rationalization/excuse table + Red Flags self-check block immediately after the RED run command — from superpowers lines 256-288. Distinct from the evidence/claim gate at Step 5 (which gates AFTER work) and from the regression proof ritual (which validates a specific guard): this table intercepts rationalizations BEFORE the test step is skipped. PBP adaptation: command references use `bin/d rspec` per CLAUDE.local.md rule #2.
-- Source: `/tmp/superpowers-20260610/skills/test-driven-development/SKILL.md` (MIT license)
-
-<!-- Kaizen: 2026-06-10 — Purge stale tool references (superpowers-spike 2026-06-10 drift findings) -->
-- Removed: `mcp__playwright__*` from frontmatter allowed-tools — the Playwright MCP server is not configured in this project; its presence caused dispatch confusion. Playwright system tests via `bin/test_system` and `system_specs/` are real and fully documented in the System Tests section above.
-- Removed: "Playwright MCP" subsection (~lines 540-561) that referenced the unconfigured MCP server tools.
-- Fixed: frontmatter description rewritten from workflow summary ("Always write tests FIRST before any implementation. Covers unit, integration, and system tests") to trigger conditions only — CSO rule: description = when to invoke, never the process; agents that read the description instead of the body follow an incomplete workflow.
-- Lesson: stale allowed-tools in frontmatter are loaded at session start and pollute the tool namespace with non-functional tools; check on every superpowers-spike pass.
+<!-- Kaizen history archived to kaizen_log.md -->
