@@ -1,13 +1,15 @@
 ---
 name: security
 description: Security audit using Brakeman, OWASP patterns, and project-specific checks. Validates credential handling, payment security, and common vulnerabilities.
-allowed-tools: [Bash, Read, Grep, Glob, Edit, mcp__clickhouse__run_select_query, mcp__honeybadger__list_faults, mcp__honeybadger__get_fault]
+allowed-tools: [Bash, Read, Grep, Glob, Edit, mcp__clickhouse__run_query, mcp__honeybadger__list_faults, mcp__honeybadger__get_fault]
 disable-model-invocation: false
 ---
 
 > **📋 Config Priority**: `CLAUDE.local.md` overrides `CLAUDE.md` for local settings (Docker, linting, coverage). Always check both files for current project conventions.
 
 ## When to Use This Skill
+
+> **Skill boundary**: `/security` = general OWASP/Brakeman/auth/controller/credential audits. `/pci-compliance` = card-data and payment-specific PCI-DSS requirements (use when touching payment gateways, card storage, or PCI Req 3/4/6). Both can run together; they don't duplicate — `/pci-compliance` is the deeper payment gate.
 
 Run this skill when:
 - **Before production deployment** of payment/auth changes (prevent vulnerabilities)
@@ -196,45 +198,11 @@ bin/d brakeman -f json -o tmp/brakeman.json
 
 ### Step 2: Check for Common Vulnerabilities
 
-```bash
-# SQL Injection - Raw SQL with interpolation
-grep -rn "where(\".*\#{" app/ --include="*.rb"
-grep -rn "execute(\".*\#{" app/ --include="*.rb"
-```
-**Expected**: 0 matches (all queries should be parameterized)
-
-```bash
-# XSS - raw/html_safe without sanitization
-grep -rn "raw\|html_safe" app/views/ --include="*.erb"
-grep -rn "sanitize" app/views/ --include="*.erb"  # Should be present
-```
-**Expected**: Each raw/html_safe should have corresponding sanitize nearby
-
-```bash
-# Mass Assignment - permit all
-grep -rn "permit!" app/controllers/ --include="*.rb"
-```
-**Expected**: 0 matches (use explicit permit with field list)
-
-```bash
-# Open Redirect
-grep -rn "redirect_to params\[" app/controllers/ --include="*.rb"
-```
-**Expected**: 0 matches (validate/whitelist redirect URLs)
+> Run the grep patterns from the **Quick Validation Commands** block above (SQL injection, XSS, mass assignment, open redirect, credentials, sensitive-data logging). All expected results are documented there.
 
 ### Step 3: Check Sensitive Data Handling
 
-```bash
-# Logging sensitive data (FORBIDDEN)
-grep -rn "logger\.\|Rails.logger\.\|puts\|p " app/ --include="*.rb" | grep -i "card\|cvv\|password\|token\|secret"
-```
-**Expected**: 0 matches (no sensitive data should be logged - PCI violation)
-
-```bash
-# Hardcoded credentials (FORBIDDEN)
-grep -rn "api_key\|secret_key\|password" app/ --include="*.rb" | grep -v "ENV\|Rails.application.credentials\|attr_encrypted"
-```
-**Expected**: 0 matches (all credentials should use ENV or Rails credentials)
+> Covered by items 2 and 3 in the **Quick Validation Commands** block above (hardcoded credentials and sensitive data in logs).
 
 ### Step 4: Webhook Security Check
 
@@ -264,7 +232,7 @@ Verify no sensitive data is exposed in production:
 
 **Use MCP tool**:
 ```
-mcp__clickhouse__run_select_query:
+mcp__clickhouse__run_query:
   query: "SELECT id, name, CASE WHEN auth_token IS NOT NULL AND auth_token != '' THEN 'UNENCRYPTED!' ELSE 'OK' END as status FROM pbp_productionDB_optimized.webhooks_urls WHERE auth_token IS NOT NULL AND auth_token != '' LIMIT 10"
 ```
 
@@ -435,38 +403,31 @@ obj = Marshal.load(params[:serialized])
 obj = JSON.parse(params[:data])
 ```
 
-## Real PBP Security Violations
+### Illustrative examples (NOT from this codebase — do not cite as evidence)
 
-Real violations found in production codebase:
+These examples demonstrate common vulnerability patterns. They are NOT sourced from real files or line numbers in this codebase — they are teaching examples only.
 
-**VIOLATION 1: Hardcoded API credentials in code**
+**EXAMPLE 1: Hardcoded API credentials**
 ```ruby
-# ❌ BAD - Found in app/services/payment_service/stripe_gateway.rb (removed 2024-11)
-class PaymentService::StripeGateway
-  API_KEY = 'sk_live_abc123xyz'  # Hardcoded production key!
+# ❌ BAD - Hardcoded production key
+class PaymentService::SomeGateway
+  API_KEY = 'sk_live_abc123xyz'
 end
 
-# Impact: API key exposed in Git history, compromised credential
-# Risk: CRITICAL - Anyone with repo access can make production API calls
-
 # ✅ GOOD - Use Rails credentials
-class PaymentService::StripeGateway
+class PaymentService::SomeGateway
   def api_key
     Rails.application.credentials.dig(:stripe, :api_key)
   end
 end
 ```
 
-**VIOLATION 2: SQL injection in facility search**
+**EXAMPLE 2: SQL injection in search**
 ```ruby
-# ❌ BAD - Found in app/controllers/admin/facilities_controller.rb:156
+# ❌ BAD - String interpolation in WHERE clause
 def search
   @facilities = Facility.where("name LIKE '%#{params[:query]}%'")
 end
-
-# Impact: SQL injection - attacker can query any data
-# Example attack: params[:query] = "' OR '1'='1"
-# Risk: CRITICAL - Data breach, bypassed multi-tenancy
 
 # ✅ GOOD - Parameterized query
 def search
@@ -474,35 +435,25 @@ def search
 end
 ```
 
-**VIOLATION 3: Sensitive data logged to production**
+**EXAMPLE 3: Sensitive data logged**
 ```ruby
-# ❌ BAD - Found in app/services/payment_service/base.rb:234
+# ❌ BAD - PCI-DSS violation: card data in logs
 def process_payment(card_data)
   Rails.logger.info("Processing payment with card: #{card_data[:number]}")
-  # ...
 end
-
-# Impact: PCI-DSS violation - card data in logs
-# Production: 12,345 card numbers logged to CloudWatch (2024-09 incident)
-# Risk: CRITICAL - PCI compliance failure, potential $100k+ fine
 
 # ✅ GOOD - Log only metadata
 def process_payment(card_data)
   Rails.logger.info("Processing payment for user: #{current_user.id}")
-  # ...
 end
 ```
 
-**VIOLATION 4: Missing facility scoping (IDOR vulnerability)**
+**EXAMPLE 4: Missing facility scoping (IDOR)**
 ```ruby
-# ❌ BAD - Found in app/controllers/reservations_controller.rb:89
+# ❌ BAD - Unscoped find allows cross-facility access
 def show
   @reservation = Reservation.find(params[:id])
 end
-
-# Impact: Users can view reservations from other facilities
-# Example: User from facility_id=1 accesses reservation from facility_id=2
-# Risk: HIGH - Multi-tenancy breach, data leakage between 1,800 facilities
 
 # ✅ GOOD - Scoped to current facility
 def show
@@ -510,15 +461,15 @@ def show
 end
 ```
 
-**VIOLATION 5: Webhook credentials exposed in JSON**
-```ruby
-# ❌ BAD - Found in app/models/webhooks/url.rb:67 (fixed 2024-12)
-def as_json(options = {})
-  super  # Includes encrypted_auth_token, encrypted_auth_token_iv
-end
+**EXAMPLE 5: Webhook credentials exposed in JSON**
 
-# Impact: API response exposes encrypted credentials and IVs
-# Risk: MEDIUM - With IV + ciphertext, attacker can decrypt credentials
+Note: The real webhook model is at `packs/webhooks/app/models/url.rb` (not `app/models/webhooks/url.rb`).
+
+```ruby
+# ❌ BAD - as_json includes encrypted fields and their IVs
+def as_json(options = {})
+  super
+end
 
 # ✅ GOOD - Exclude encrypted fields
 def as_json(options = {})
@@ -526,20 +477,16 @@ def as_json(options = {})
 end
 ```
 
-**VIOLATION 6: XSS in user-generated content**
-```ruby
-# ❌ BAD - Found in app/views/memberships/show.html.erb:34
-<div class="membership-notes">
-  <%= raw @membership.notes %>
+**EXAMPLE 6: XSS in user-generated content**
+```erb
+<%# ❌ BAD - Unescaped raw output %>
+<div class="notes">
+  <%= raw @record.notes %>
 </div>
 
-# Impact: XSS attack - attacker injects <script> in notes field
-# Example: notes = "<script>alert('XSS')</script>"
-# Risk: MEDIUM - Session hijacking, CSRF attacks
-
-# ✅ GOOD - Sanitize HTML
-<div class="membership-notes">
-  <%= sanitize @membership.notes, tags: %w[b i u p br] %>
+<%# ✅ GOOD - Sanitize HTML %>
+<div class="notes">
+  <%= sanitize @record.notes, tags: %w[b i u p br] %>
 </div>
 ```
 
@@ -774,59 +721,11 @@ This skill works with:
 2. Then append improvements to this skill file using Edit tool
 3. Format: `<!-- Kaizen: YYYY-MM-DD --> New content`
 
-**Recent Improvements**:
+**Recent Improvements** (full log: [kaizen_log.md](kaizen_log.md)):
 
-<!-- Kaizen: 2026-02-01 - ClickHouse Query Deduplication -->
-- **Removed**: Inline ClickHouse queries (35 lines of duplication)
-- **Replaced**: Reference to shared/clickhouse-queries.md for queries #1-3, #6
-- **Added**: MCP tool usage example with expected results
-- **Why**: Eliminates 35 lines of duplicated SQL, single source of truth for security queries
-- **Impact**: Easier maintenance, consistency across security/multi-tenancy/code-review skills
-- **ROI**: 2.0 (Medium impact - affects 4+ skills, Low effort - simple reference replacement)
+<!-- Kaizen: 2026-06-10 — Fabrication purge / honest baselines (Fable audit Tier 2') -->
+- Deleted/relabeled 6 fabricated "Real PBP Violations": `admin/facilities_controller.rb` (does not exist — only `organizations_controller.rb` and `sso_approvals_controller.rb` are in `app/controllers/admin/`), `reservations_controller.rb:89` (file is 73 lines — line 89 does not exist), `payment_service/base.rb:234` (file is 44 lines), `app/models/webhooks/url.rb` (real path is `packs/webhooks/app/models/url.rb`), `app/views/memberships/show.html.erb` (does not exist). Section relabeled "Illustrative examples (NOT from this codebase — do not cite as evidence)" and fake file:line citations stripped.
+- The webhooks/url.rb example was kept but corrected to reflect the real pack path.
+- Lesson: file:line citations must verify against HEAD or be labeled illustrative; boasting about "real files, real line numbers" in Kaizen is only valid when the citations have been verified.
 
-<!-- Kaizen: 2026-02-01 - Comprehensive Security Improvements -->
-**Major usability and clarity improvements:**
-
-1. **Added "When to Use" section** (ROI: 2.0)
-   - 5 clear triggers: before deployment, after auth changes, PR review, new gateway, security incidents
-   - Users know exactly when to invoke security audits
-   - Documented 14 gateways requiring security validation
-
-2. **Added Quick Validation Commands** (ROI: 2.5)
-   - 6 automated checks for instant vulnerability detection
-   - Expected output documented for each command
-   - Severity indicators: CRITICAL, HIGH RISK, MEDIUM RISK
-   - 50% faster than manual Brakeman + grep workflow
-
-3. **Added expected results to all grep commands** (ROI: 2.0)
-   - All validation commands now show expected output
-   - Clear success criteria (0 matches = safe, >0 matches = vulnerability)
-   - Added expected results to: Step 2 (4 checks), Step 3 (2 checks), Step 4 (2 checks), Quick PCI Check (4 checks)
-   - Users can instantly validate if code is secure
-
-4. **Added real PBP security violations** (ROI: 1.5)
-   - 6 concrete violations from actual codebase:
-     * Hardcoded API credentials (stripe_gateway.rb)
-     * SQL injection (facilities_controller.rb:156)
-     * Sensitive data logged (payment_service/base.rb:234 - 12,345 cards logged)
-     * Missing facility scoping - IDOR (reservations_controller.rb:89)
-     * Webhook credentials exposed (webhooks/url.rb:67)
-     * XSS in user content (memberships/show.html.erb:34)
-   - Real files, real line numbers, real production impact
-   - Includes PCI incident data (2024-09, potential $100k+ fine)
-
-5. **Added Related Skills section** (ROI: 1.0)
-   - Links to pci-compliance, multi-tenancy, graphql, code-review, gateway-consistency
-   - Documents orchestrate integration in Phase 2 (Validation)
-
-**Impact:**
-- Vulnerability detection 50% faster (Quick Validation section)
-- Validation clarity 100% improved (expected outputs for all checks)
-- Examples 80% clearer (real production violations vs generic OWASP)
-- Discoverability improved (when to use, related skills)
-
-**Lines changed:** 488 → ~680 (+192 lines, +39% documentation)
-**Time invested:** 20 minutes
-**ROI:** 1.8 average across all improvements
-
-<!-- Kaizen entries will be added here -->
+<!-- Kaizen: 2026-06-10 — ClickHouse MCP tool name: run_select_query → run_query (residue cleanup, Fable audit Tier 2') -->
