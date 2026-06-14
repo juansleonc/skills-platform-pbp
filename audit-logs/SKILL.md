@@ -129,14 +129,24 @@ end
 
 ### Step 2.5: Register in event_actions.yml
 
-Every new event MUST be registered in `packs/audit_logs/config/event_actions.yml`:
+Every new event MUST be registered in `packs/audit_logs/config/event_actions.yml`.
+The real file format uses a **class-name handler** (not a snake_case string) and an
+optional `expected_target_type`. Copy the structure below (taken verbatim from the file):
 
 ```yaml
-new_event:
-  category: 'player_profile'        # or 'reservation_pricing', 'membership_plans'
-  description: 'What happened'
-  display_value_handler: 'new_event' # Maps to DisplayValueGenerators::NewEventHandler
+# Real entry from packs/audit_logs/config/event_actions.yml:
+payment_method_added:
+  description: "Adding a new Credit Card"
+  category: player_profile
+  display_value_handler: PaymentMethodHandler
+  expected_target_type: Payment
 ```
+
+Key differences from older incorrect examples:
+- `display_value_handler` is a **CamelCase class name** (`PaymentMethodHandler`), not a snake_case string.
+- `expected_target_type` is a class name (e.g. `Payment`, `User`, `MembershipPlan`, `Facility`).
+- `category` has no quotes in the real file; use one of: `player_profile`, `reservation_pricing`,
+  `membership_plan`, `calendar_actions`.
 
 Without this entry, `EventTracker` will reject the event. Also create the corresponding
 display value handler in `packs/audit_logs/app/services/display_value_generators/`.
@@ -252,51 +262,35 @@ end
 
 ---
 
-## Event Catalog (28 events)
+## Event Catalog (dynamic — regenerate from source)
 
-### Player Profile Events (24)
-| Event | Tracker | Status |
-|-------|---------|--------|
-| Credit Card Added | PaymentMethodAddedTracker | ✅ |
-| Credit Card Removed | PaymentMethodRemovedTracker | ✅ |
-| Default Payment Method Changed | DefaultPaymentMethodChangedTracker | ✅ |
-| Rating Linked | RatingLinkedTracker | ✅ |
-| Rating Unlinked | RatingUnlinkedTracker | ✅ |
-| NRPP Rating Updated | RatingUpdatedNprpTracker | ✅ |
-| Player Profile Edited | PlayerProfileUpdatedTracker | ✅ |
-| Player Blocked | PlayerBlockedTracker | ✅ |
-| Player Profile Deleted | PlayerProfileDeletedTracker | ✅ |
-| Player Note Added | PlayerNoteAddedTracker | ✅ |
-| Proof of Residency Updated | PlayerProofOfResidencyUpdatedTracker | ✅ |
-| Funds Added | FundsAddedTracker | ✅ |
-| NRPP Questionnaire Sent | NprpQuestionnaireSentTracker | ✅ |
-| Membership Added | MembershipAddedTracker | ✅ |
-| Family Member Linked | FamilyMemberLinkedTracker | ✅ |
-| Family Member Unlinked | FamilyMemberUnlinkedTracker | ✅ |
-| Family Member Updated | FamilyMemberUpdatedTracker | ✅ |
-| Family Member Added | FamilyMemberAddedTracker | ✅ |
-| Notification Settings Changed | NotificationSettingsChangedTracker | ✅ |
-| Package Added | PackageAddedTracker | ✅ |
-| Transaction Refunded | TransactionRefundedTracker | ✅ |
-| Billing Address Added | BillingAddressAddedTracker | ✅ |
-| Billing Address Updated | BillingAddressUpdatedTracker | ✅ |
-| Billing Address Deleted | BillingAddressDeletedTracker | ✅ |
+The static catalog was stale (claimed 28 events; real count as of 2026-06-14: **39 trackers**, **38 events** in YAML,
+with a `calendar_actions` / `booking_*` category not represented in the old table).
+Note: 41 files total in `trackers/`; subtract `base_tracker.rb` and `booking_base_tracker.rb` → 39 real trackers.
 
-### Reservation Pricing Events (1)
-| Event | Tracker | Status |
-|-------|---------|--------|
-| Pricing Updated | PricingUpdatedTracker | ✅ |
+**Always regenerate current counts before quoting numbers:**
 
-### Membership Plan Events (1)
-| Event | Tracker | Status |
-|-------|---------|--------|
-| Membership Plan Updated | MembershipPlanUpdatedTracker | ✅ |
+```bash
+# Count tracker files (excludes base_tracker.rb and booking_base_tracker.rb)
+ls packs/audit_logs/app/services/trackers/ | grep -v '^base_tracker\|^booking_base_tracker' | wc -l
 
-### Waitlist Events (2) — Added by CORE-124
-| Event | Tracker | Status |
-|-------|---------|--------|
-| Waitlist Created | WaitlistCreatedTracker | ✅ |
-| Waitlist Cancelled | WaitlistCancelledTracker | ✅ |
+# Full list of registered events and their categories:
+cat packs/audit_logs/config/event_actions.yml
+```
+
+The authoritative source for registered events is
+`packs/audit_logs/config/event_actions.yml` (one key per event, with
+`category`, `description`, `display_value_handler`, and optional
+`expected_target_type`).
+
+**Sample entries — regenerate from the commands above for current truth:**
+
+| Event key | Category | Tracker |
+|-----------|----------|---------|
+| `payment_method_added` | `player_profile` | `PaymentMethodAddedTracker` |
+| `booking_player_cancelled` | `calendar_actions` | `BookingPlayerCancelledTracker` |
+| `membership_plan_updated` | `membership_plan` | `MembershipPlanUpdatedTracker` |
+| `waitlist_created` | `calendar_actions` | `WaitlistCreatedTracker` |
 
 ---
 
@@ -413,25 +407,10 @@ end
 
 ---
 
-## Kaizen: Continuous Improvement
+## Continuous Improvement
 
-> "Every day we must improve" - 改善
+If you discover a new pattern, missing convention, or event catalog drift while executing this skill:
+1. Complete the current validation first.
+2. Run `/kaizen` with the finding — do NOT self-edit this file inline.
 
-**While executing this skill**, if you discover:
-- A new audit log pattern that should be documented
-- A missing convention or edge case
-- A mistake in the event catalog
-
-**You MUST**:
-1. Complete the current validation first
-2. Then append improvements to this skill file using Edit tool
-3. Format: `<!-- Kaizen: YYYY-MM-DD --> New content`
-
-<!-- Kaizen: 2026-03-13 - Initial skill creation from CORE-124 PR learnings -->
-**Created from CORE-124 PR review feedback (SegundoRP):**
-- Rule: Error handling centralized in BaseTracker.call, never in controllers
-- Rule: metadata is for UI display, IDs go in related_objects
-- Rule: Titleize display values (surface names, etc.)
-- Documented all 28 events from Confluence + code
-- Added common mistakes section from real PR review
-- Added new tracker template for quick scaffolding
+History: see [`kaizen_log.md`](kaizen_log.md).
