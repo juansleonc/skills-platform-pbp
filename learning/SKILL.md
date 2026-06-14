@@ -16,7 +16,7 @@ disable-model-invocation: false
 Capture user corrections in real time, extract the underlying lesson, and persist it across two surfaces:
 
 1. **Auto-memory** — `~/.claude/projects/-Users-leon-workspace-pbp-platform/memory/feedback_*.md` survives across conversations.
-2. **Skill kaizen sections** — `.claude/skills/<name>/skill.md` changes behavior in future skill runs.
+2. **Skill kaizen sections** — `.claude/skills/<name>/SKILL.md` changes behavior in future skill runs.
 
 Corrections are the highest-signal training data available. Every correction missed is a future repeat.
 
@@ -154,7 +154,7 @@ type: feedback
 
 **Slug rules**:
 - `feedback_<topic>.md`, lowercase, snake_case, ≤ 5 words
-- Check existing memories first via `ls memory/feedback_*.md`
+- Check existing memories first via `ls ~/.claude/projects/-Users-leon-workspace-pbp-platform/memory/feedback_*.md`
 - If similar exists, prefer **update** over create (use Edit, append `**Update <date>:**` line)
 
 Then update `MEMORY.md` index — append under the appropriate `### Heading` (or create new heading if topic is new):
@@ -166,23 +166,77 @@ Then update `MEMORY.md` index — append under the appropriate `### Heading` (or
 
 #### 4b. Skill kaizen propagation (only on `y`)
 
-For each skill in the `Affected skills` list, append to its `skill.md`:
+For each skill in the `Affected skills` list, append to its `SKILL.md`:
 
 ```markdown
 <!-- Kaizen: YYYY-MM-DD - User correction -->
 - Rule: <Rule statement>
 - Why: <Reason>
 - How to apply: <When/where>
-- Source: User correction on <date>. See `memory/feedback_<slug>.md`.
+- Source: User correction on <date>. See `~/.claude/projects/-Users-leon-workspace-pbp-platform/memory/feedback_<slug>.md`.
 ```
 
 Place at the end of the skill's "Recent Improvements" / "Kaizen" section. If no such section exists, create one at the end of the file.
+
+#### 4c. Typed frontmatter edges in topic files (always on `y` or `m`, when a relation is expressed)
+
+**Rule: prose entry in MEMORY.md AND typed frontmatter key in the topic file — never just one.**
+
+Why: machine-readable edges let a future linter or graph follow supersession chains instead of parsing English prose (per the knowledge-graph ADR, decision item 3).
+
+When the learning being persisted expresses one of these relationships to another memory file, write the corresponding frontmatter key directly in the affected topic file(s):
+
+| Relationship | Old file gets | New file gets (optional) |
+|---|---|---|
+| This learning supersedes an older one | `superseded_by: <new-file-stem>` + `status: superseded` | `supersedes: <old-file-stem>` |
+| This learning corrects an older one | `corrects: <other-file-stem>` on the correcting file | — |
+| This learning belongs to a ticket lineage | `ticket: CORE-XXX` on the new file | — |
+| This learning CONTRADICTS an existing node (both remain valid, unresolved) | `conflicts: [<new-file-stem>]` appended to peer file's list (symmetric — peer lists new, new lists peer) | `conflicts: [<peer-file-stem>]` on the new file |
+
+**`conflicts:` decision gate** (apply before writing — mirrors §2 of `DESIGN-knowledge-lint.md`):
+```
+correction vs existing node:
+  fully replaces it         → superseded_by  (row 1 above)
+  fixes one wrong token     → corrects        (row 2 above)
+  contradicts, unresolved   → conflicts       (row 4 above — NEW)
+  ambiguous which applies   → ASK USER before writing any edge
+```
+Do NOT pick a winner — the whole point of `conflicts:` vs `superseded_by:` is that resolution is deferred to a human. Emit the edge and STOP. Never guess `superseded_by` when the correct edge is `conflicts`.
+
+**Symmetry requirement** (enforced by C4 linter): when writing `conflicts:`, BOTH files must list each other. If the peer already has a `conflicts:` list, append to it (dedup). If no list exists, create it. Also add a one-line note in MEMORY.md under BOTH entries: `(conflicts with [[<other>]] — unresolved, see frontmatter)`.
+
+**`conflicts:` list shape** (YAML, top-level, list of bare stems):
+```yaml
+conflicts:
+  - peer_file_stem_here
+```
+
+**Stems in `conflicts:` use** the same bare-stem format as `superseded_by:` (filename without `.md`); normalization-aware (`-`≡`_`, case-insensitive per the linter).
+
+**How to add the frontmatter key**: open the affected topic file; if it already has a `---` frontmatter block, insert the new key as a sibling of `name`/`description`/`type` (before the closing `---`). If no frontmatter block exists, prepend one. Example — marking an old file as superseded:
+
+```markdown
+---
+name: Old finding title
+description: One-line description
+status: superseded
+superseded_by: project_core639_spec_date_rot
+metadata:
+  type: project
+---
+```
+
+**Checklist before closing Phase 4**:
+- [ ] MEMORY.md prose entry written (4a)
+- [ ] `updated: YYYY-MM-DD` frontmatter key written/refreshed in the topic file (today's date — enables hot-set recency ranking in MEMORY.md; match `updated: "2026-06-14"` quoted-string format)
+- [ ] Skill kaizen propagation done if `y` (4b)
+- [ ] If a supersession/correction/ticket/conflict relation was expressed: typed frontmatter edge written in the topic file(s) (4c)
 
 ### Phase 5: Confirm to User
 
 ```
 ✅ Guardado:
-  📝 memory/feedback_<slug>.md (nuevo)
+  📝 ~/.claude/projects/-Users-leon-workspace-pbp-platform/memory/feedback_<slug>.md (nuevo)
   🔄 MEMORY.md actualizado (sección "Lessons Learned")
   🧠 Propagado a: code-review, tdd, coverage
 
@@ -228,13 +282,13 @@ Existing: feedback_xxx.md says "<old rule>"
 New:      "<new rule>"
 
 Acciones:
-  r → reemplazar (delete old, write new)
-  k → conservar ambos (older context may still apply)
-  m → fusionar (combine into one entry)
+  r → reemplazar (new fully supersedes old → write superseded_by: edge in old file)
+  k → conservar ambos sin resolución (contradición genuina → write conflicts: edge in BOTH files per Phase 4c)
+  m → fusionar (combine into one entry, mark old as superseded)
   c → cancelar
 ```
 
-Default: ask user. Never auto-resolve.
+Default: ask user. Never auto-resolve. Note: `k` maps to the `conflicts:` typed-edge pathway in Phase 4c — both files must list each other symmetrically.
 
 ---
 
@@ -288,7 +342,7 @@ Append at end of target skill:
 - Rule: <Rule>
 - Why: <Reason>
 - How to apply: <When/where>
-- Source: User correction on <date>. See `memory/feedback_<slug>.md`.
+- Source: User correction on <date>. See `~/.claude/projects/-Users-leon-workspace-pbp-platform/memory/feedback_<slug>.md`.
 ```
 
 ---
@@ -311,7 +365,7 @@ Detected → Extract:
 User confirms: y
 
 Saved:
-  📝 memory/feedback_lean_comments.md (already exists → updated with new example)
+  📝 ~/.claude/.../memory/feedback_lean_comments.md (already exists → updated with new example)
   🔄 MEMORY.md (entry already present, no change)
   🧠 Propagado a: code-review, tdd, architect (kaizen entries added)
 ```
@@ -332,7 +386,7 @@ Detected → Extract:
 User confirms: y
 
 Saved:
-  📝 memory/feedback_pronto_before_commit.md (already exists → reinforced)
+  📝 ~/.claude/.../memory/feedback_pronto_before_commit.md (already exists → reinforced)
   🧠 Propagado a: commit, create-pr, code-review
 ```
 
@@ -352,7 +406,7 @@ Detected → Extract:
 User confirms: y
 
 Saved:
-  📝 memory/feedback_controller_naming.md (NEW)
+  📝 ~/.claude/.../memory/feedback_controller_naming.md (NEW)
   🔄 MEMORY.md → new entry under "### Rails Naming Conventions"
   🧠 Propagado a: code-review, architect
 ```
@@ -372,12 +426,4 @@ When `/kaizen` runs, it should report stats on corrections captured by `/learnin
 
 ## Recent Improvements (Kaizen)
 
-<!-- Kaizen: 2026-05-09 - Initial creation -->
-- Created: `/learning` skill with hybrid trigger (detection + confirmation)
-- Storage: dual — auto-memory (feedback_*.md) + skill kaizen sections
-- Mechanism: relies on `CLAUDE.local.md` rule #15 to instruct model to invoke this skill on detected corrections (no real auto-trigger; ~90% reliable)
-- Skill mapping: 16 categories of correction topics mapped to relevant skills
-- Conflict resolution: 4 actions (replace/keep-both/merge/cancel)
-- False positive cooldown: 3 consecutive `n` → disable auto-suggest this session
-- Why: prior to this skill, every correction had to be manually transcribed into a feedback_*.md file; many were lost
-- ROI: 3.0 (high value preventing repeats, low effort reusing existing memory infrastructure)
+> Full history archived in [`kaizen_log.md`](kaizen_log.md). Add new entries there; promote to the active body only if they change operational behavior.
