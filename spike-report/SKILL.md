@@ -1,18 +1,10 @@
 ---
 name: spike-report
-description: Generate beautiful interactive HTML reports for technical spikes with SVG diagrams, permission matrices, and gap analysis
-version: 1.0.0
-author: skill-creator
-created: 2026-02-10
-tags: [documentation, visualization, spikes, architecture, reporting]
-dependencies: [context7]
-triggers:
-  manual:
-    - /spike-report
-    - /spike-report [name] [type]
-    - /spike-report --sections [sections]
-related_skills: [architect, opsx:new, code-review]
+description: Use when presenting completed spike research to stakeholders as an interactive HTML report — after the spike investigation is done, before the stakeholder review.
+allowed-tools: [Write, Read, Bash, Glob, Grep, mcp__context7__query-docs, mcp__context7__resolve-library-id]
+disable-model-invocation: true
 ---
+<!-- Preserved from original frontmatter: created 2026-02-10 by skill-creator; related skills: architect, opsx:new, code-review; supports architecture/feature/performance/security/integration/migration spike types. -->
 
 > **📋 Config Priority**: `CLAUDE.local.md` overrides `CLAUDE.md` for local settings (Docker, linting, coverage). Always check both files for current project conventions.
 
@@ -571,6 +563,9 @@ end
 **Save Files**:
 
 ```bash
+# 0. Ensure output directory exists (created lazily — not committed)
+mkdir -p investigations/spikes
+
 # 1. HTML report (gitignored via .git/info/exclude — personal artifact, NOT docs/)
 Write: "investigations/spikes/SPIKE_{spike_name}_{date}.html"
 
@@ -632,7 +627,7 @@ output: "✅ Report generated: file:///path/to/investigations/spikes/SPIKE_{spik
 5. 📊 Permission Matrix (8 roles × 12 permissions)
 6. 🔍 Gap Analysis (current vs proposed)
 
-# Output
+# Output (investigations/spikes/ will be created if it doesn't exist yet)
 ✅ Generated: investigations/spikes/SPIKE_RBAC_Permissions_2026-02-10.html (1,234 lines)
 📝 Summary: investigations/spikes/SPIKE_RBAC_Permissions_2026-02-10.md
 📊 Preview: file:///Users/leon/workspace/pbp/platform/investigations/spikes/SPIKE_RBAC_Permissions_2026-02-10.html
@@ -834,62 +829,8 @@ Failure indicators:
 **Cause**: Too many files analyzed or complex diagrams
 **Fix**: Reduce scope with `--sections` flag
 
-## Kaizen: Continuous Improvement
+## Kaizen
 
-> "Every report teaches us how to make the next one better" - 改善
+If you discover a better SVG layout, diagram type, analysis pattern, or new spike type to support — complete the current report first, then run `/kaizen` to document and promote the improvement.
 
-**While executing this skill**, if you discover:
-- Better SVG layout algorithm
-- More intuitive diagram type
-- Faster analysis pattern
-- Accessibility improvement
-- New spike type to support
-
-**You MUST**:
-1. Complete current report generation
-2. Use Edit tool to update this skill.md
-3. Format: `<!-- Kaizen: YYYY-MM-DD - [improvement] -->`
-4. Document in "Recent Improvements" section below
-
-**Recent Improvements**:
-
-<!-- Kaizen: 2026-02-10 - Initial creation -->
-Created `/spike-report` skill from proven pattern:
-- Based on 2 real RBAC spike reports (v1: 677 lines, v2: 1,246 lines)
-- Automates HTML/CSS/SVG generation (saves 2.5 hours per spike)
-- Supports 6 spike types: architecture, feature, performance, security, integration, migration
-- Integrates with context7 for best practices
-- Expected ROI: 9x (27 hours/year saved vs 3 hours maintenance)
-
-Next improvements needed:
-- [ ] Add D3.js integration for more complex interactive diagrams
-- [ ] Support Mermaid diagram conversion (markdown → SVG)
-- [ ] Add PDF export option (for offline sharing)
-- [ ] Create gallery of example reports (investigations/spikes/examples/)
-- [ ] Add real-time preview server (live reload during generation)
-- [ ] Support custom themes (dark mode, company branding)
-
----
-
-## Meta: Skill Creation Log
-
-**Created by**: skill-creator agent
-**Date**: 2026-02-10
-**Triggered by**: User request after creating 2 RBAC spike reports
-**Pattern detected**: Manual HTML/SVG/CSS report generation (2-3 hours per spike)
-**Score**: 19/20 (Very Strong Candidate)
-**ROI estimate**: 9x
-**Approval**: User approved immediately
-
-**Implementation notes**:
-- Skill generates HTML with embedded SVG (no external dependencies beyond Tailwind CDN)
-- Uses context7 for best practices research (SVG, Tailwind, accessibility)
-- Supports 6 spike types with customizable sections
-- Template-based generation with variable substitution
-- Validates output for syntax, accessibility, responsiveness
-
-**Success metrics to track**:
-- Time to first report: < 5 minutes
-- User satisfaction: Positive feedback on clarity/beauty
-- Reuse rate: ≥ 80% of major spikes use this skill
-- Maintenance burden: < 3 hours/year for updates
+Full history and meta notes: [kaizen_log.md](kaizen_log.md)
