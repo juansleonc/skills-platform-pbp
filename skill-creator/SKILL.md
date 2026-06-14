@@ -262,7 +262,7 @@ Session activity:
 │                        ▼                                │
 │  Phase 5: GENERATE (Create Skill File)                 │
 │  ┌──────────────────────────────────────────────┐      │
-│  │ • Create .claude/skills/<name>/skill.md      │      │
+│  │ • Create .claude/skills/<name>/SKILL.md      │      │
 │  │ • Generate YAML frontmatter                  │      │
 │  │ • Write Purpose section                      │      │
 │  │ • Define When to Use                         │      │
@@ -361,6 +361,13 @@ If approved, run: `/skill-creator create skill-name`
 When creating new skill, use this structure:
 
 ```markdown
+---
+name: <skill-name>
+description: Use when <concrete triggering condition — triggers only, no workflow summary (CSO Rule)>.
+allowed-tools: [Bash, Read, Grep, Glob, Edit, Write]
+disable-model-invocation: false
+---
+
 # <Skill Name> - <One-Line Purpose>
 
 > "<Philosophical quote>" - <Japanese kanji>
@@ -443,11 +450,14 @@ Created from pattern detected in session YYYY-MM-DD:
 
 ## Integration with Orchestrator
 
-The orchestrator integrates skill-creator:
+> **NOT IMPLEMENTED** — skill-creator is **manual-only**. The orchestrator (`orchestrate/SKILL.md`) lists it as a Meta-Skill with zero automatic triggers. The pseudocode below is aspirational design; no session hook or cron fires it automatically.
 
-### End of Session Hook
+The ideas below describe what a future automated integration _could_ look like, kept for reference:
+
+### End of Session Hook (aspirational — not wired up)
 ```ruby
-# After session completes (orchestrator)
+# ASPIRATIONAL PSEUDOCODE — this hook does not exist in the orchestrator.
+# Invoke /skill-creator manually when you notice a pattern worth automating.
 def end_of_session_hook
   # Analyze session transcript
   patterns = SkillCreator.detect_patterns(session_transcript)
@@ -457,7 +467,7 @@ def end_of_session_hook
 
   if candidates.any?
     # Present to user
-    puts "\n🔍 Skill Creation Opportunities Detected:"
+    puts "\n Skill Creation Opportunities Detected:"
     candidates.each do |c|
       puts "- #{c.name} (ROI: #{c.roi}x, Score: #{c.score}/10)"
     end
@@ -468,9 +478,9 @@ def end_of_session_hook
 end
 ```
 
-### Weekly Aggregation
+### Weekly Aggregation (aspirational — not wired up)
 ```ruby
-# Every 7 days (cron or manual)
+# ASPIRATIONAL PSEUDOCODE — no cron or scheduler fires this.
 def weekly_skill_report
   # Aggregate patterns across sessions
   cross_session_patterns = analyze_last_7_days
@@ -540,7 +550,7 @@ description: Use when repetitive work detected — scan sessions, score patterns
 description: Use when repetitive manual work is identified across 3+ sessions on real codebase
 ```
 
-**Sweep lint for existing skills**: Our own `orchestrate` and `adversarial-review` descriptions currently contain workflow-summary language. When editing either, bring the description into compliance with this rule. Do not leave process detail in `description:` even if it "seems helpful" — it trains agents to stop reading.
+**Sweep lint for existing skills**: When editing any skill, check its `description:` against this rule. The `orchestrate` skill description has historically drifted toward workflow-summary language — verify it starts with "Use when" and states only triggering conditions. Note: `adversarial-review` is currently **compliant** (its description states trigger conditions only — "Use when reviewing a code change, validating a fix, or before declaring any implementation correct"); do not change it in pursuit of this rule. Do not leave process detail in `description:` even if it "seems helpful" — it trains agents to stop reading.
 
 **Checklist addition** — before Phase 6 (Validate), confirm:
 - [ ] `description:` starts with "Use when..." or states concrete triggering conditions
@@ -867,31 +877,4 @@ Don't create skills prematurely. Let patterns prove themselves. Semi-automation 
 
 ## Meta-Kaizen
 
-<!-- Kaizen: 2026-01-31 - Initial Creation -->
-Created skill-creator to:
-- Detect skill gaps from session patterns
-- Semi-automatically propose new skills
-- Maintain single responsibility (separate from /kaizen)
-- Execute at end of session via /orchestrate
-- Prevent skill bloat through quality gates
-- Track actual ROI after creation
-
-Next improvements needed:
-- Add cross-session pattern aggregation
-- Implement weekly skill opportunity reports
-- Create skill template validator
-- Add automatic orchestrator integration detection
-
-<!-- Kaizen: 2026-06-09 — CSO description-lint rule (adapted from obra/superpowers, MIT) -->
-Added the "Frontmatter Lint: description: Must State Triggers Only (CSO Rule)" section.
-- Rule: a skill's description: must state ONLY when-to-use, never summarize the workflow/steps.
-- Why: a workflow-summary description trains the agent to follow the description and skip the skill body (observed: a "code review between tasks" description caused ONE review where the body required TWO).
-- Source: 4-agent blind re-harvest of obra/superpowers (MIT); verdict unchanged (don't adopt wholesale); grafted 3 net-new mechanisms (CSO here; evidence-table + regression-revert ritual into /tdd).
-
-<!-- Kaizen: 2026-06-10 — Pressure-Test Before Ship (TDD for Skills) -->
-Added "Pressure-Test Before Ship" section (RED baseline → GREEN with-skill → pressure variants → acceptance rule).
-- Source: obra/superpowers writing-skills + testing-skills-with-subagents.md (MIT, commit 6fd4507).
-- Trigger: spike (investigations/superpowers-spike/findings.md, 2026-06-10) found 50/50 local skills never behavior-tested; real defects shipped (fabricated file:line citations in multi-tenancy/SKILL.md; CSO violation in tdd frontmatter). Deferred-until-observed trigger condition fired.
-- What was added: Iron Law quote; RED (fresh subagent baseline without skill); GREEN (with skill); 7 pressure types table (verbatim from testing-skills-with-subagents.md); PBP-flavored $10k/min payment-incident pressure scenario; acceptance rule (≥1 RED + ≥1 GREEN + ≥1 pressure-combo documented).
-- What was NOT ported: EXTREMELY_IMPORTANT wrappers, persuasion-principles/Cialdini framing, SessionStart hook, superpowers CLI test harness (tests/claude-code/) — these conflict with documented low-friction philosophy (memory: feedback_no_redundant_verification_hooks). The test bench here is Agent-tool subagent dispatch only.
-- Canonical protocol lives here; kaizen/SKILL.md cross-references rather than duplicates.
+> Changelog archived to [`kaizen_log.md`](kaizen_log.md) (4 entries, 2026-01-31 → 2026-06-14).
