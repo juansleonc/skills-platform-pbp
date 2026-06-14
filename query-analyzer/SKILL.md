@@ -1,7 +1,7 @@
 ---
 name: query-analyzer
-description: Analyzes database query performance using EXPLAIN plans, index usage validation, and ClickHouse historical data. Prevents slow queries before they hit production.
-allowed-tools: [Bash, Read, Grep, Glob, Edit, mcp__clickhouse__run_select_query, mcp__clickhouse__list_tables]
+description: "Analyzes a SPECIFIC query: EXPLAIN plans, index validation, and ClickHouse volume context before it hits production. Distinct from /performance (broad N+1/index/memory code-pattern review across a diff)."
+allowed-tools: [Bash, Read, Grep, Glob, Edit, mcp__clickhouse__run_query, mcp__clickhouse__list_tables]
 disable-model-invocation: false
 ---
 
@@ -18,6 +18,7 @@ Validates query performance using MySQL EXPLAIN plans and ClickHouse production 
 3. **Avoid SELECT *** when you only need specific columns
 4. **Batch large queries** to prevent timeout/memory issues
 5. **Check production patterns** in ClickHouse before optimizing
+6. **FINAL on ReplacingMergeTree tables** — Always add `FINAL` when querying application tables that use ReplacingMergeTree or SharedReplacingMergeTree (e.g., `memberships`, `membership_transactions`). Without `FINAL`, ClickHouse counts superseded row-versions, inflating results up to ~20×. Sanity-gate: compare `count()` vs `count() FINAL` before reporting any magnitude.
 
 ## Shared References
 
@@ -81,44 +82,33 @@ bin/d rails runner "
 grep "add_index.*users" db/schema.rb
 ```
 
-### Step 4: Analyze with ClickHouse Production Data
+### Step 4: Analyze with ClickHouse Production Data (Volume Context)
 
-Use MCP tool to query production patterns:
+> **NOTE on slow-query analysis**: ClickHouse does NOT log MySQL application queries. `system.query_log` is not accessible in this environment (the table is not visible to the readonly user — coordinator-verified 2026-06-10). Slow-query analysis happens via MySQL EXPLAIN in Docker (Step 2).
 
-```ruby
-# Find slow queries on specific table
-mcp__clickhouse__run_select_query:
-  query: "
-    SELECT
-      query,
-      count() as query_count,
-      avg(query_duration_ms) as avg_duration,
-      max(query_duration_ms) as max_duration,
-      sum(read_rows) as total_rows_read
-    FROM system.query_log
-    WHERE query LIKE '%users%'
-      AND query_duration_ms > 500
-      AND event_date >= today() - 7
-    GROUP BY query
-    ORDER BY avg_duration DESC
-    LIMIT 20
-  "
+> ⚠️ **CRITICAL (FINAL rule)**: All application tables in `pbp_productionDB_optimized` use `SharedReplacingMergeTree`. Always add `FINAL` to prevent ~20× row-count inflation from superseded row-versions. Sanity-gate: compare `count()` vs `count() FINAL` before reporting any magnitude.
 
-# Check index effectiveness
-mcp__clickhouse__run_select_query:
-  query: "
-    SELECT
-      table,
-      sum(read_rows) as rows_scanned,
-      count() as query_count,
-      avg(query_duration_ms) as avg_time
-    FROM system.query_log
-    WHERE type = 'QueryFinish'
-      AND event_date >= today() - 7
-      AND table IN ('users', 'reservations', 'facilities')
-    GROUP BY table
-    ORDER BY avg_time DESC
-  "
+ClickHouse is useful for **volume context** — understanding data distribution in production to inform whether an optimization is worth pursuing. Use the `mcp__clickhouse__run_query` tool:
+
+```sql
+-- Row count for reservations in the last 30 days (volume context)
+SELECT count() FROM pbp_productionDB_optimized.reservations FINAL
+WHERE created_at >= today() - 30
+
+-- Active memberships by state (volume context)
+SELECT aasm_state, count() as total
+FROM pbp_productionDB_optimized.memberships FINAL
+WHERE deleted_at = toDateTime(0)
+GROUP BY aasm_state
+ORDER BY total DESC
+
+-- Reservations per court (helps decide if court_id index is high-cardinality)
+SELECT court_id, count() as total
+FROM pbp_productionDB_optimized.reservations FINAL
+WHERE created_at >= today() - 30
+GROUP BY court_id
+ORDER BY total DESC
+LIMIT 20
 ```
 
 ### Step 5: Validate Query Patterns
@@ -136,13 +126,18 @@ users.each { |u| puts u.facility.name }  # 2 queries total
 
 #### Pattern 2: Missing Indexes
 ```ruby
-# ❌ BAD - No index on facility_id
-Reservation.where(facility_id: facility.id)
+# ❌ BAD - No index on status (reservations has court_id, not facility_id;
+#          facility is reached via court.facility_id)
+Reservation.where(status: 'confirmed')
 # EXPLAIN shows: type: ALL, rows: 50000
 
-# ✅ GOOD - Add index
-add_index :reservations, :facility_id
-# EXPLAIN shows: type: ref, rows: 100
+# ✅ GOOD - Filter on indexed column
+Reservation.where(court_id: court.id)
+# EXPLAIN shows: type: ref, key: index_reservations_on_court_id, rows: ~50
+
+# To scope by facility, join through courts:
+Reservation.joins(:court).where(courts: { facility_id: facility.id })
+# Ensure index exists on courts.facility_id (it does: index_courts_on_facility_id)
 ```
 
 #### Pattern 3: Over-selecting Columns
@@ -189,14 +184,15 @@ end
 # If missing indexes detected, generate migration
 bin/d rails generate migration AddIndexToReservations
 
-# Add to migration file:
+# Add to migration file (use real columns — reservations has court_id, not facility_id):
 class AddIndexToReservations < ActiveRecord::Migration[6.1]
   def change
-    # Single column index
-    add_index :reservations, :facility_id
+    # Index for status filtering (common query pattern)
+    add_index :reservations, :status
 
-    # Composite index for common query pattern
-    add_index :reservations, [:facility_id, :status]
+    # Composite index for court + date queries (already exists as on_court_and_date,
+    # but if adding a new one):
+    add_index :reservations, [:court_id, :status]
 
     # Unique index
     add_index :users, :email, unique: true
@@ -247,77 +243,46 @@ Assign complexity score to queries:
 
 ## Integration with ClickHouse MCP
 
-### Query 1: Find Tables Needing Indexes
+> **Scope**: ClickHouse holds replicated copies of application tables (`pbp_productionDB_optimized`). Use it for **volume context** only (see Step 4 for the `system.query_log` caveat and FINAL rule).
+
+### Runnable Volume Queries (via `mcp__clickhouse__run_query`)
+
+Always add `FINAL` on `*ReplacingMergeTree` tables to avoid ~20× row-count inflation.
 
 ```sql
--- Run via mcp__clickhouse__run_select_query
-SELECT
-  table,
-  count() as queries_without_index,
-  avg(query_duration_ms) as avg_duration,
-  sum(read_rows) as total_rows_scanned
-FROM system.query_log
-WHERE type = 'QueryFinish'
-  AND has(arrayFilter(x -> x.type = 'ALL', query_plan.steps), 1)
-  AND event_date >= today() - 7
-GROUP BY table
-HAVING queries_without_index > 100
-ORDER BY avg_duration DESC
-LIMIT 20;
-```
+-- Total reservations created in the last 30 days
+SELECT count() FROM pbp_productionDB_optimized.reservations FINAL
+WHERE created_at >= today() - 30
 
-### Query 2: Identify Slow Query Patterns
+-- Reservation volume by court (useful before adding a court_id composite index)
+SELECT court_id, count() as total
+FROM pbp_productionDB_optimized.reservations FINAL
+WHERE created_at >= today() - 30
+GROUP BY court_id
+ORDER BY total DESC
+LIMIT 20
 
-```sql
-SELECT
-  normalized_query_hash,
-  any(query) as example_query,
-  count() as occurrences,
-  avg(query_duration_ms) as avg_time,
-  max(query_duration_ms) as max_time,
-  sum(read_rows) as total_rows
-FROM system.query_log
-WHERE type = 'QueryFinish'
-  AND query_duration_ms > 500
-  AND event_date >= today() - 7
-  AND query NOT LIKE '%system.%'
-GROUP BY normalized_query_hash
-ORDER BY occurrences DESC
-LIMIT 30;
-```
-
-### Query 3: Index Hit Rate
-
-```sql
-SELECT
-  table,
-  countIf(key IS NOT NULL) as queries_with_index,
-  countIf(key IS NULL) as queries_without_index,
-  round(queries_with_index / (queries_with_index + queries_without_index) * 100, 2) as index_hit_rate
-FROM (
-  SELECT
-    table,
-    JSONExtractString(extra, 'key') as key
-  FROM system.query_log
-  WHERE type = 'QueryFinish'
-    AND event_date >= today() - 7
-)
-GROUP BY table
-ORDER BY index_hit_rate ASC
-LIMIT 20;
+-- Membership distribution by state (uses real column: aasm_state, not 'active')
+SELECT aasm_state, count() as total
+FROM pbp_productionDB_optimized.memberships FINAL
+WHERE deleted_at = toDateTime(0)
+GROUP BY aasm_state
+ORDER BY total DESC
 ```
 
 ## Report Format
+
+> **Template illustration** — fill in real EXPLAIN output and Benchmark.ms timings. ClickHouse provides row-count / cardinality context only; execution frequency and P95 latency fields are not available (`system.query_log` inaccessible — see Step 4). Omit or replace those fields with Benchmark.ms results from Docker.
 
 ```markdown
 ## Query Analysis Report
 
 ### Summary
-- Files analyzed: 3
-- Queries analyzed: 12
-- Slow queries detected: 4
-- Missing indexes: 2
-- Complexity score: 78/100 ⚠️
+- Files analyzed: N
+- Queries analyzed: N
+- Slow queries detected: N
+- Missing indexes: N
+- Complexity score: N/100
 
 ### Query Performance Issues
 
@@ -330,14 +295,12 @@ Reservation.where(status: 'confirmed')
 
 **EXPLAIN Analysis**:
 - Type: ALL (full table scan)
-- Rows scanned: 45,000
-- Duration: 2.3s avg (from ClickHouse)
+- Rows scanned: 45,000 (from EXPLAIN)
+- Benchmark: 2.3s avg (Benchmark.ms in Docker — see Step 7)
 - Complexity Score: 120 🚨 CRITICAL
 
-**Production Impact** (ClickHouse):
-- Executes: 1,200 times/day
-- Total time wasted: 46 minutes/day
-- P95 latency: 3.8s
+**ClickHouse volume context**:
+- Total reservations with status='confirmed': N (use FINAL)
 
 **Fix**:
 ```ruby
@@ -349,8 +312,8 @@ Reservation.where(status: 'confirmed').select(:id, :user_id, :starts_at)
 ```
 
 **Expected Impact**:
-- Rows scanned: 45,000 → 200
-- Duration: 2.3s → 12ms (192x faster)
+- Rows scanned: 45,000 → ~200 (from EXPLAIN after index)
+- Benchmark: 2.3s → ~12ms
 - Complexity Score: 120 → 15 ✅
 
 ---
@@ -365,34 +328,32 @@ User.where(active: true)
 # Then each user queries facility (N+1)
 ```
 
-**ClickHouse shows**:
-- 180 facility queries for single users request
-- Avg: 15ms each = 2.7s total
-
 **Fix**:
 ```ruby
 User.includes(:facility, :memberships).where(active: true)
 ```
 
 **Expected Impact**:
-- Queries: 181 → 3
-- Duration: 2.7s → 80ms (33x faster)
+- Queries: N+1 → 2-3
+- Benchmark: measure before/after with Benchmark.ms
 
 ---
 
 ### Missing Indexes
 
-| Table | Column(s) | Query Pattern | Impact |
-|-------|-----------|---------------|--------|
-| reservations | status | WHERE status = ? | 2.3s → 12ms |
-| memberships | user_id, active | WHERE user_id = ? AND active = true | 450ms → 8ms |
+| Table | Column(s) | Query Pattern | Benchmark Before |
+|-------|-----------|---------------|-----------------|
+| reservations | status | WHERE status = ? | measure |
+| memberships | owner_id, aasm_state | WHERE owner_id = ? AND aasm_state = ? | measure |
+
+Note: `memberships` has `owner_id` (not `user_id`) and `aasm_state` (not `active`). Both already have single-column indexes; a composite may be needed for combined filters.
 
 ### Recommendations
 
 1. **Add indexes** (migration needed):
    ```ruby
    add_index :reservations, :status
-   add_index :memberships, [:user_id, :active]
+   add_index :memberships, [:owner_id, :aasm_state]
    ```
 
 2. **Optimize queries**:
@@ -402,22 +363,8 @@ User.includes(:facility, :memberships).where(active: true)
 
 3. **Before deployment**:
    - Run EXPLAIN on all new queries
-   - Verify ClickHouse patterns for similar queries
-   - Benchmark before/after
-
-### Performance Metrics
-
-**Before Optimization**:
-- Avg query time: 1.2s
-- Total daily query time: 48 minutes
-- Queries > 1s: 24%
-
-**After Optimization** (projected):
-- Avg query time: 65ms
-- Total daily query time: 2.6 minutes
-- Queries > 1s: 0%
-
-**ROI**: Saves 45 minutes/day of database time
+   - Use ClickHouse volume queries (FINAL) for cardinality context
+   - Benchmark before/after in Docker (Step 7)
 ```
 
 ## Example Usage
@@ -461,23 +408,7 @@ User.includes(:facility, :memberships).where(active: true)
 
 ## Helper Script
 
-Create `lib/query_analyzer.rb`:
-
-```ruby
-# lib/query_analyzer.rb
-class QueryAnalyzer
-  def self.analyze(file_path)
-    # Extract queries from file
-    # Run EXPLAIN
-    # Calculate complexity
-    # Query ClickHouse for production data
-  end
-
-  def self.score_query(explain_output)
-    # Calculate complexity score
-  end
-end
-```
+> **Not implemented** — no `lib/query_analyzer.rb` exists in the codebase. Use the commands above (`bin/d rails console` + `puts query.explain`, `grep` on changed files) directly.
 
 ---
 
@@ -485,20 +416,6 @@ end
 
 > "Every day we must improve" - 改善
 
-**While executing this skill**, if you discover:
-- A new query anti-pattern
-- A better EXPLAIN interpretation
-- A useful ClickHouse analysis query
+**While executing this skill**, if you discover a new anti-pattern, a better EXPLAIN interpretation, or a useful ClickHouse query: complete the current analysis first, then run `/kaizen` to append to [kaizen_log.md](kaizen_log.md). Do not self-edit SKILL.md mid-execution.
 
-**You MUST**:
-1. Complete the current analysis first
-2. Then append improvements to this skill file using Edit tool
-3. Format: `<!-- Kaizen: YYYY-MM-DD --> New content`
-
-<!-- Kaizen entries will be added here -->
-
-<!-- Kaizen: 2026-06-02 - User correction -->
-- Rule: ALWAYS use `FINAL` (or `argMax(col, updated_at)` dedup) on ANY ClickHouse `*ReplacingMergeTree` table before `count()`/`GROUP BY`. Verify the engine first: `SELECT engine FROM system.tables WHERE database=… AND name=…`. Apply `FINAL` to EVERY joined ReplacingMergeTree table whose columns you filter on (syntax: `FROM db.table AS alias FINAL`).
-- Why: Without `FINAL`, an UPDATEd row's superseded versions are still physically present and get counted — inflating results (CORE-639 sweep: 122,776 vs deduped-truth 5,831, ~20×, with 0h replica lag → pure version-duplication, not staleness). Nearly drove a wrong operational decision (~266 facilities vs real ~43).
-- How to apply: Sanity-gate `count()` vs `count() FINAL` — if they differ materially you MUST use FINAL. Any CH-derived "what remains / how many pending" magnitude must be reconciled against the authoritative live source (rake DRY_RUN / MySQL) before being reported. CH = screen; rake/MySQL = truth.
-- Source: User correction on 2026-06-02. See `memory/feedback_clickhouse_final_dedup.md`.
+> **History**: all past Kaizen entries are archived in [kaizen_log.md](kaizen_log.md) — all have been promoted into the active body above.
