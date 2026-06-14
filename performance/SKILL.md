@@ -1,7 +1,7 @@
 ---
 name: performance
-description: Detects N+1 queries, missing indexes, memory issues, and slow operations. Validates performance patterns for Rails, GraphQL, and Sidekiq.
-allowed-tools: [Bash, Read, Grep, Glob, Agent, Edit, mcp__clickhouse__run_select_query, mcp__clickhouse__list_tables, mcp__opensearch__*, mcp__rails__*, mcp__ide__executeCode, mcp__ide__getDiagnostics]
+description: "Detects N+1 queries, missing indexes, memory issues, and slow operations across a diff or code change. Distinct from /query-analyzer (EXPLAIN plans + ClickHouse historical analysis for a specific slow query)."
+allowed-tools: [Bash, Read, Grep, Glob, Agent, Edit, mcp__clickhouse__run_query, mcp__clickhouse__list_tables, mcp__opensearch__SearchIndexTool, mcp__rails__execute_ruby]
 disable-model-invocation: false
 ---
 
@@ -232,130 +232,85 @@ grep -rn "\.each\|\.map\|\.find_each" <changed_files> --include="*.rb" -A5 | gre
 ```
 **Expected**: Review associations accessed in loops - need `includes` for each
 
-## Real PBP Performance Violations
+### Illustrative examples (NOT from this codebase — do not cite as evidence)
 
-Real performance issues found in production codebase:
+These examples demonstrate common performance anti-patterns. They are NOT sourced from real files or line numbers in this codebase. Metrics (timings, memory figures) are hypothetical to illustrate the pattern.
 
-**VIOLATION 1: N+1 query in admin dashboard**
+**EXAMPLE 1: N+1 query in admin dashboard**
 ```ruby
-# ❌ BAD - Found in app/controllers/admin/facilities_controller.rb:34
+# ❌ BAD - Eager loading missing
 def index
   @facilities = Facility.where(active: true)
 end
-
-# View: app/views/admin/facilities/index.html.erb
-<% @facilities.each do |facility| %>
-  <%= facility.owner.email %>           # N+1 query!
-  <%= facility.courts.count %>          # N+1 query!
-  <%= facility.memberships.active.count %>  # N+1 query!
-<% end %>
-
-# Impact: 1,800 facilities × 3 queries = 5,400 queries instead of 4
-# Production: New Relic shows 8.2s page load time
+# View iterates and calls facility.owner / facility.courts.count — N+1 queries
 
 # ✅ GOOD - Eager load associations
 def index
   @facilities = Facility.where(active: true)
                        .includes(:owner, :courts, :memberships)
 end
-# After fix: 200ms page load time (41× faster)
 ```
 
-**VIOLATION 2: Missing index on facility_id**
-```ruby
-# ❌ BAD - Found via New Relic slow query report
-# Query: SELECT * FROM reservations WHERE facility_id = 123 AND status = 'confirmed'
-# Time: 2.3s avg (10.4M reservations scanned)
+Note: `app/controllers/admin/facilities_controller.rb` does not exist at HEAD (only `organizations_controller.rb` and `sso_approvals_controller.rb` are in `app/controllers/admin/`).
 
-# db/schema.rb shows:
-create_table "reservations" do |t|
+**EXAMPLE 2: Missing index on a frequently-queried foreign key**
+```ruby
+# ❌ BAD - No index on a high-cardinality FK
+create_table "some_table" do |t|
   t.integer "facility_id"
   t.string "status"
-  # NO INDEX on facility_id!
+  # NO INDEX on facility_id
 end
 
-# Impact: Every facility query scans millions of rows
-
-# ✅ GOOD - Add composite index
-# db/migrate/20260201_add_index_to_reservations.rb
-add_index :reservations, [:facility_id, :status]
-
-# After fix: 45ms avg query time (51× faster)
+# ✅ GOOD - Composite index matches common query
+add_index :some_table, [:facility_id, :status]
 ```
 
-**VIOLATION 3: Memory bloat in export job**
+Note on `reservations`: The actual `reservations` table uses `court_id` (not `facility_id`) — facility is reached via court. Any index recommendation must match the actual schema column.
+
+**EXAMPLE 3: Memory bloat in export job**
 ```ruby
-# ❌ BAD - Found in app/jobs/export_users_job.rb:12
+# ❌ BAD - Loads all records into memory at once
 def perform(args)
-  facility_id = args[:facility_id]
-  users = Facility.find(facility_id).users.all.to_a  # Loads ALL users!
-
-  csv = CSV.generate do |csv|
-    users.each { |u| csv << [u.email, u.name] }  # 100k users in memory!
-  end
+  users = Facility.find(args[:facility_id]).users.all.to_a
+  # 100k users → OOM risk
 end
 
-# Impact: Facility with 100k users → 2GB memory → job killed by Sidekiq
-
-# ✅ GOOD - Batch processing
+# ✅ GOOD - Batch with find_each
 def perform(args)
-  facility_id = args[:facility_id]
-  facility = Facility.find(facility_id)
-
-  csv = CSV.generate do |csv|
-    facility.users.find_each(batch_size: 1000) do |user|
-      csv << [user.email, user.name]  # Only 1000 users in memory at a time
-    end
+  Facility.find(args[:facility_id]).users.find_each(batch_size: 1000) do |user|
+    # At most 1000 objects in memory
   end
 end
-
-# After fix: 150MB max memory usage (13× reduction)
 ```
 
-**VIOLATION 4: GraphQL N+1 in mobile app**
+Note: `app/jobs/export_users_job.rb` does not exist at HEAD.
+
+**EXAMPLE 4: GraphQL N+1 in mobile app**
 ```ruby
-# ❌ BAD - Found in app/graphql/types/facility_type.rb:45
-field :courts, [CourtType], null: false
-
+# ❌ BAD - Loads courts per-facility without eager loading
 def courts
-  object.courts  # N+1 when mobile app requests 20 facilities!
-end
-
-# Impact: Mobile app "Facilities Near Me" → 20 facilities × courts query = 21 queries
-# New Relic: 1.8s API response time
-
-# ✅ GOOD - Use dataloader or preload
-field :courts, [CourtType], null: false
-
-def courts
-  # Preloaded in resolver via includes(:courts)
   object.courts
 end
 
-# Or use dataloader:
+# ✅ GOOD - Use dataloader or preloaded includes
 def courts
   dataloader.with(Sources::Courts).load(object.id)
 end
-
-# After fix: 120ms API response time (15× faster)
 ```
 
-**VIOLATION 5: Inefficient count query**
+Note: `app/graphql/types/facility_type.rb` does not exist at HEAD (the `app/graphql/types/` directory contains only base classes and scalar types; domain types are located elsewhere in the codebase).
+
+**EXAMPLE 5: Ruby-side count instead of SQL COUNT**
 ```ruby
-# ❌ BAD - Found in app/services/dashboard_service.rb:67
-def active_memberships_count
-  facility.memberships.where(status: 'active').to_a.count  # Loads ALL records!
-end
+# ❌ BAD - Loads all records just to count them
+facility.memberships.where(status: 'active').to_a.count
 
-# Impact: Loads 50k memberships just to count them (500MB memory waste)
-
-# ✅ GOOD - Database count
-def active_memberships_count
-  facility.memberships.where(status: 'active').count  # SELECT COUNT(*)
-end
-
-# After fix: <1MB memory, 95% faster
+# ✅ GOOD - Let the database count
+facility.memberships.where(status: 'active').count  # SELECT COUNT(*)
 ```
+
+Note: `app/services/dashboard_service.rb` does not exist at HEAD (there is `packs/internal_backend/app/services/internal/reports/dashboard_service.rb`).
 
 ### Step 3: Check Missing Indexes
 
@@ -367,18 +322,19 @@ grep -rn "belongs_to\|has_many" app/models/ --include="*.rb" | grep -v "#"
 grep "index.*facility_id\|index.*user_id" db/schema.rb
 ```
 
-```sql
--- ClickHouse: Find slow queries by table
-SELECT
-  query,
-  query_duration_ms,
-  read_rows
-FROM system.query_log
-WHERE query LIKE '%<table_name>%'
-  AND query_duration_ms > 1000
-ORDER BY query_duration_ms DESC
-LIMIT 20;
+```bash
+# PRIMARY: Use MySQL EXPLAIN in Docker to profile slow ActiveRecord queries
+bin/d rails runner "puts Model.where(facility_id: 1).explain"
+
+# For row-count / volume context, query the replicated ClickHouse table (FINAL required)
+# Example: check reservation volume that might explain a slow query
+# mcp__clickhouse__run_query:
+#   query: "SELECT count() FROM pbp_productionDB_optimized.reservations FINAL WHERE facility_id = <id>"
+#
+# For production query timings, use New Relic (named in CLAUDE.md monitoring stack) —
+# system.query_log is NOT accessible in this ClickHouse Cloud environment.
 ```
+> **Note**: `system.query_log` logs ClickHouse-internal queries, not MySQL/Rails queries, and is not accessible in this environment (verified count=0 in system.tables). For MySQL slow queries: enable `slow_query_log` locally, or use `EXPLAIN` via `bin/d rails runner`.
 
 ### Step 4: Detect Memory Issues
 
@@ -478,32 +434,31 @@ def perform(args)
 end
 ```
 
-### Step 8: Verify with ClickHouse
+### Step 8: Verify with ClickHouse (volume/row-count context only)
+
+> **Important**: `system.query_log` is NOT accessible in this ClickHouse Cloud environment and logs ClickHouse-internal queries — not MySQL/Rails queries. Use the approaches below instead.
+
+**For slow MySQL query identification**: use EXPLAIN in Docker or New Relic production timings.
+
+```bash
+# EXPLAIN a specific Rails query in Docker
+bin/d rails runner "puts Reservation.where(facility_id: 1, status: 'active').explain"
+bin/d rails runner "puts Membership.where(aasm_state: 'active').joins(:membership_plan).explain"
+```
+
+**For production row-count / volume context** (replicated app tables — FINAL required):
 
 ```sql
--- Find tables without indexes that are frequently queried
-SELECT
-  table,
-  sum(read_rows) as total_reads,
-  avg(query_duration_ms) as avg_duration
-FROM system.query_log
-WHERE type = 'QueryFinish'
-  AND query_duration_ms > 100
-GROUP BY table
-ORDER BY avg_duration DESC;
+-- Row volume for a table (to assess index impact at scale)
+-- FINAL required: SharedReplacingMergeTree deduplicates row versions
+SELECT count() FROM pbp_productionDB_optimized.reservations FINAL
+WHERE facility_id = <facility_id>;
 
--- Find slow queries patterns
-SELECT
-  normalized_query_hash,
-  count() as query_count,
-  avg(query_duration_ms) as avg_ms,
-  max(query_duration_ms) as max_ms
-FROM system.query_log
-WHERE query_duration_ms > 500
-GROUP BY normalized_query_hash
-ORDER BY avg_ms DESC
-LIMIT 20;
+SELECT count() FROM pbp_productionDB_optimized.memberships FINAL
+WHERE facility_id = <facility_id> AND status = 'active';
 ```
+
+**For production query timings**: consult New Relic (named in CLAUDE.md monitoring stack) — it captures real Rails/MySQL response times per endpoint.
 
 ### Step 9: Code Optimization (RECOMMENDED)
 
@@ -684,17 +639,16 @@ This skill works with:
 
 ### ClickHouse MCP (Recommended)
 
-Use for verifying performance against production data:
+Use for row-count / volume context against production replicated tables (FINAL required).
+**Do NOT use `system.query_log`** — it is not accessible in this ClickHouse Cloud environment and only logs ClickHouse-internal queries, not MySQL/Rails queries.
 
 ```
-# Find slow queries by table
-mcp__clickhouse__run_select_query:
+# Row-count context: how many rows does this query touch at production scale?
+mcp__clickhouse__run_query:
   query: |
-    SELECT query, query_duration_ms, read_rows
-    FROM system.query_log
-    WHERE query LIKE '%<table_name>%'
-      AND query_duration_ms > 1000
-    ORDER BY query_duration_ms DESC LIMIT 20
+    SELECT count() FROM pbp_productionDB_optimized.payments FINAL
+    WHERE facility_id = <facility_id>
+      AND created_at >= today() - 30
 ```
 
 ### OpenSearch MCP (Optional)
@@ -703,13 +657,10 @@ Use for analyzing search query performance:
 
 ```
 # Check slow search queries
-mcp__opensearch__search:
+mcp__opensearch__SearchIndexTool:
   index: users
   query: { "match_all": {} }
   explain: true
-
-# Check index health
-mcp__opensearch__cluster_health
 ```
 
 ### Rails MCP (Optional)
@@ -717,225 +668,23 @@ mcp__opensearch__cluster_health
 Use for interactive debugging when needed:
 
 ```
-# Check routes for N+1 potential
-mcp__rails__routes:
-  pattern: "users"
-
 # Query model associations
-mcp__rails__console:
+mcp__rails__execute_ruby:
   command: "User.reflect_on_all_associations.map(&:name)"
 ```
 
 
 ---
 
-## Kaizen: Continuous Improvement
+## Kaizen Log
 
-> "Every day we must improve" - 改善
+> Full history archived in [kaizen_log.md](kaizen_log.md). Add new entries there and run `/kaizen` to promote lessons into the active body — do NOT self-edit SKILL.md mid-execution.
 
-**While executing this skill**, if you discover:
-- A new N+1 detection pattern
-- A missing performance check
-- A better ClickHouse analysis query
+**Recent entries** (2 most recent):
 
-**You MUST**:
-1. Complete the current performance audit first
-2. Then append improvements to this skill file using Edit tool
-3. Format: `<!-- Kaizen: YYYY-MM-DD --> New content`
+<!-- Kaizen: 2026-06-10 — Fabrication purge / honest baselines -->
+- Deleted/relabeled 4 fabricated "Real PBP Violations" (files do not exist at HEAD). Section relabeled "Illustrative examples (NOT from this codebase)". Invented New Relic metrics removed. Schema claim corrected: `reservations` has `court_id`, not `facility_id`. MCP tool names corrected throughout.
 
-**Recent Improvements**:
-
-<!-- Kaizen: 2026-01-24 - Jupyter Notebook Integration -->
-## 📓 Jupyter Notebook Integration (Recommended)
-
-Use JupyterLab for **performance analysis** when you need to:
-- Run complex ClickHouse queries iteratively
-- Visualize query patterns and trends
-- Compare before/after performance metrics
-- Document performance findings
-
-### Launch Jupyter for Performance Analysis
-
-```bash
-~/jupyter-env/bin/jupyter lab
-```
-
-### Example Performance Analysis Notebook
-
-```python
-# Cell 1: Setup ClickHouse connection
-%load_ext sql
-%sql clickhouse://default:@localhost:8123/pbp_productionDB_optimized
-
-# Cell 2: Find slow queries
-%%sql
-SELECT
-  normalized_query_hash,
-  count() as query_count,
-  avg(query_duration_ms) as avg_ms,
-  max(query_duration_ms) as max_ms,
-  sum(read_rows) as total_rows_read
-FROM system.query_log
-WHERE query_duration_ms > 500
-  AND event_date = today()
-GROUP BY normalized_query_hash
-ORDER BY avg_ms DESC
-LIMIT 20
-
-# Cell 3: Visualize table access patterns
-import pandas as pd
-import matplotlib.pyplot as plt
-
-df = _
-df.plot(kind='bar', x='normalized_query_hash', y='avg_ms')
-plt.title('Average Query Duration by Pattern')
-plt.xticks(rotation=45)
-
-# Cell 4: Check index usage
-%%sql
-SELECT
-  table,
-  sum(read_rows) as total_reads,
-  sum(read_bytes) as total_bytes,
-  count() as query_count
-FROM system.query_log
-WHERE type = 'QueryFinish'
-  AND event_date = today()
-GROUP BY table
-ORDER BY total_reads DESC
-LIMIT 20
-```
-
-### Performance Monitoring Queries
-
-```python
-# N+1 detection via query patterns
-%%sql
-SELECT
-  query,
-  count() as repetitions
-FROM system.query_log
-WHERE type = 'QueryFinish'
-  AND query LIKE '%SELECT%FROM%WHERE%id = %'
-  AND event_date = today()
-GROUP BY query
-HAVING repetitions > 10
-ORDER BY repetitions DESC
-
-# Memory usage by query
-%%sql
-SELECT
-  query,
-  memory_usage,
-  peak_memory_usage,
-  query_duration_ms
-FROM system.query_log
-WHERE peak_memory_usage > 100000000  -- > 100MB
-ORDER BY peak_memory_usage DESC
-LIMIT 10
-```
-
-### MCP IDE Tools Available
-
-- `mcp__ide__executeCode`: Execute Python in active Jupyter kernel
-- `mcp__ide__getDiagnostics`: Get language diagnostics
-
-<!-- Kaizen: 2026-01-31 - MCP Tools Integration -->
-## Kaizen Entry: MCP Tools for Performance Analysis
-
-**What Changed:**
-- Added reference to shared MCP tools guide at top of skill
-- Updated documentation to emphasize MCP tools for production data verification
-- Changed "OPTIONAL - Manual Use" messaging to "Recommended" for ClickHouse
-- Added priority table showing MCP tools as 🥇 PRIMARY, grep as 🥈 FALLBACK
-
-**Why:**
-- Performance analysis needs real production data (10.4M users, 1.8K facilities)
-- Grep-based analysis works but lacks production context
-- ClickHouse queries reveal actual slow query patterns in production
-- Consistent with other skills (debug, architect, code-review)
-
-**Impact:**
-- More accurate performance predictions
-- Catches production-specific issues before deployment
-- Prevents slow queries that only manifest at scale
-- ROI: 2.5 (High impact, Medium effort)
-
-<!-- Kaizen: 2026-01-31 - Code Simplifier Integration -->
-## Kaizen Entry: Code Simplifier Integration for Auto-Optimization
-
-**What Changed:**
-- Added `Task` to allowed-tools in frontmatter
-- Added reference to shared code-simplifier-integration.md in Shared References
-- Added Step 9: Code Optimization (RECOMMENDED) after detection steps
-- Integrated Tier 2 pattern (MANDATORY for non-trivial changes)
-- Included performance-specific prompt focusing on N+1, indexes, memory, query efficiency
-
-**Why:**
-- Performance skill detects issues but doesn't auto-fix them
-- Users spend time manually applying detected optimizations
-- code-simplifier can suggest fixes automatically based on detected patterns
-- Consistent with /code-review and /tdd (both use code-simplifier)
-- Completes the "detect → optimize → validate" workflow
-
-**Impact:**
-- Faster resolution of performance issues (less manual analysis)
-- Consistent optimization patterns applied across project
-- Users learn from code-simplifier suggestions
-- ROI: 3.0 (High impact - affects all performance work, Low effort - standard integration pattern)
-
-**Example:**
-```
-Before: /performance detects 3 N+1 queries → user manually adds includes
-After: /performance detects + code-simplifier suggests exact fixes → user applies
-Time saved: ~30-50% per performance issue
-```
-
-<!-- Kaizen: 2026-02-01 -->
-## Kaizen Entry: Consistency and Real-World Examples
-
-**What Changed:**
-1. **Added "When to Use" section** (ROI: 2.0)
-   - 5 clear triggers for performance audits
-   - Users know when to invoke this skill
-
-2. **Added Quick Validation Commands** (ROI: 1.8)
-   - 5 automated grep patterns for instant N+1 detection
-   - Expected output documented for each command
-   - 35% faster than manual audit process
-
-3. **Added expected results to commands** (ROI: 1.5)
-   - All grep commands now show what "good" looks like
-   - Instant validation feedback
-
-4. **Added real PBP performance violations** (ROI: 1.2)
-   - 5 concrete violations from production:
-     * Admin dashboard N+1 (8.2s → 200ms, 41× faster)
-     * Missing reservation index (2.3s → 45ms, 51× faster)
-     * Export job memory bloat (2GB → 150MB, 13× reduction)
-     * GraphQL mobile app N+1 (1.8s → 120ms, 15× faster)
-     * Inefficient count query (500MB waste eliminated)
-   - Real metrics: New Relic timing, memory usage, query counts
-   - Real models: Facility, Reservation, User, Membership, Court
-
-5. **Added Related Skills section** (ROI: 1.0)
-   - Links to code-review, graphql, multi-tenancy, sidekiq, query-analyzer
-   - Documents orchestrate integration
-
-**Why:**
-- Performance skill is critical (affects production user experience)
-- Generic examples don't convey real impact (8.2s vs "slow")
-- Production metrics make improvements concrete (41× faster vs "better")
-- Consistency with other skills in ecosystem
-
-**Impact:**
-- Detection speed: 35% faster (Quick Validation section)
-- Examples clarity: 75% improved (real New Relic metrics vs generic)
-- Motivation: Real 41× speedup examples inspire action
-- Discoverability: Related skills improve workflow integration
-
-**Lines changed:** 609 → ~735 (+126 lines, +21% documentation)
-**Time invested:** 18 minutes
-**ROI:** 1.5 average across all improvements
-
-<!-- Kaizen entries will be added here -->
+<!-- Kaizen: 2026-06-10 — ClickHouse SQL run-test pass -->
+- Removed all queries against `system.query_log` (inaccessible in this ClickHouse Cloud environment; logs CH-internal queries, not MySQL/Rails). Replaced with: MySQL EXPLAIN via `bin/d rails runner`, replicated app tables with FINAL for row-count context, New Relic for production timings. Removed dead `mcp__ide__*` tools from frontmatter.
+- Ground truth: payments columns + table list verified against production ClickHouse by the coordinator on 2026-06-10; `system.query_log` is not accessible in this environment.
