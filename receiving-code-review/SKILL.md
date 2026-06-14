@@ -13,7 +13,7 @@ Code review is **technical evaluation, not emotional performance**. External fee
 
 **Core principle:** Verify before implementing. Gate before acting. Technical correctness over social comfort.
 
-This is the inbound counterpart to [[adversarial-review]]: there I generate findings; here I *receive* them. Both run the same **Confirm-Loop** (memory `feedback_confirm_loop_adversarial_findings`).
+This is the inbound counterpart to [[adversarial-review]]: there I generate findings; here I *receive* them. Both run the same **Confirm-Loop** (gate: real + in-scope + reproducible — see below).
 
 ## The Response Pattern
 
@@ -29,14 +29,14 @@ WHEN review feedback arrives:
 
 ## Confirm-Loop gate (before implementing ANY item)
 
-Per memory `feedback_confirm_loop_adversarial_findings` + `feedback_review_scope_and_real_repro`, keep only findings that are:
+Keep only findings that are:
 1. **Real** — a genuine defect/improvement, not a style nit the bot pattern-matched.
 2. **In-scope** — introduced by `git diff develop...HEAD` (a bot flagging pre-existing legacy code is usually out-of-scope; say so, don't silently fix unrelated lines).
 3. **Reproducible** — provable without runtime instrumentation; for prod-state claims, verify with ClickHouse (`FINAL` + lag guard) / Honeybadger — MCP as MANUAL aids, never oracles.
 
 Route confirmation by type:
-- code/logic → reproduce LOCALLY with a failing test first (rule #8 / `feedback_validate_bugs_via_real_request` — real request, not runner+stub).
-- API/library usage → Context7 (a negative docs result is low-confidence, `feedback_negative_research_result_low_confidence`).
+- code/logic → reproduce LOCALLY with a failing test first (rule #8 — real request, not runner+stub).
+- API/library usage → Context7 (a negative docs result is low-confidence; verify against signature dump before asserting absence).
 - "does this happen in prod / at what scale" → ClickHouse / Honeybadger.
 
 **Discard theoretical / out-of-scope items with a one-line technical reason.** Don't amplify a false positive just because a bot said it.
@@ -55,7 +55,7 @@ Route confirmation by type:
 
 ### Human PR reviewer (team — Erick/Rafa/etc.)
 - Trusted, but still gate scope. No performative agreement. Skip to action or a technical acknowledgment.
-- If feedback conflicts with a prior architectural decision (e.g. an intentional scope-out documented in `investigations/<ticket>/`, per `feedback_no_overengineering_compare_develop`): **stop and discuss**, don't silently comply.
+- If feedback conflicts with a prior architectural decision (e.g. an intentional scope-out documented in `investigations/<ticket>/`): **stop and discuss**, don't silently comply.
 
 ### Bots (Bugbot / CodeRabbit / Greptile)
 Before implementing, check:
@@ -100,7 +100,7 @@ Reply **in the inline comment thread**, not as a top-level PR comment:
 ```
 gh api repos/{owner}/{repo}/pulls/{pr}/comments/{id}/replies -f body="..."
 ```
-Per `feedback_draft_outward_comms`: if the reply is substantive/outward-facing, draft it and confirm before posting — don't auto-post. Commits that resolve feedback follow gitmoji + ticket format (local rule #14); never put ticket refs in code/comments (`feedback_no_ticket_refs_in_code`).
+If the reply is substantive/outward-facing, draft it and confirm before posting — don't auto-post. Commits that resolve feedback follow gitmoji + ticket format (local rule #14); never put ticket refs in code/comments (they belong in commits/PRs only).
 
 ## Terminate
 
@@ -129,10 +129,9 @@ Failure indicators:
 
 > "Every day we must improve" — 改善
 
-While executing this skill, if you find a better gate, a missed bot-feedback failure mode, or a clearer push-back pattern: finish the task, then Edit this file with `<!-- Kaizen: YYYY-MM-DD --> improvement`.
+If you discover a better gate, a missed bot-feedback failure mode, or a clearer push-back pattern: finish the task, then run `/kaizen` — do not self-edit this file mid-execution.
 
-<!-- Kaizen: 2026-06-09 - Initial creation -->
-Ported from obra/superpowers `receiving-code-review` (MIT) after a re-scan of the spike surfaced it as the one genuine behavioral gap (no PBP skill covered responding to inbound review/bot feedback). Adapted to PBP: confirm-loop gating, rule #8 TDD-on-feedback, Bugbot/CodeRabbit/Greptile as lowest-trust input, gh thread replies, no performative agreement. Discipline skill (judgment-heavy by design, like grill-me/adversarial-review). Spike: `investigations/superpowers-spike/`.
+History: [kaizen_log.md](kaizen_log.md)
 
 ---
 

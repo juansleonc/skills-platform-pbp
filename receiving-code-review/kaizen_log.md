@@ -1,0 +1,7 @@
+# Kaizen Log — receiving-code-review
+
+| Date | Entry |
+|------|-------|
+| 2026-06-09 | Initial creation. Ported from obra/superpowers `receiving-code-review` (MIT) after a re-scan of the spike surfaced it as the one genuine behavioral gap (no PBP skill covered responding to inbound review/bot feedback). Adapted to PBP: confirm-loop gating, rule #8 TDD-on-feedback, Bugbot/CodeRabbit/Greptile as lowest-trust input, gh thread replies, no performative agreement. Discipline skill (judgment-heavy by design, like grill-me/adversarial-review). Spike: `investigations/superpowers-spike/`. |
+| 2026-06-12 | User correction — Rule: Reply drafts (gh thread replies, PR comments) must be self-contained — never use internal investigation/spike shorthand (T1/T3/T4, surface names, `investigations/` slugs) the reviewer can't resolve. Describe the mechanism in plain words; keep real ticket cross-references. Why: outward-facing text reaches people without my investigation context. User: "la referencia a t4 no va, nadie va a saber que es, debe ser claro" (reviewing CORE-762). How to apply: before drafting any reply, sweep for `T<n>`/surface names/slugs and rewrite as the mechanism. Source: User correction on 2026-06-12. See `~/.claude/projects/-Users-leon-workspace-pbp-platform/memory/feedback_outward_no_internal_shorthand.md`. |
+| 2026-06-14 | Skills audit cleanup — archived Kaizen entries to this sibling file; removed self-edit-via-Edit anti-pattern (→ /kaizen); stripped non-navigable `memory slug` decorators from active body (rules already restated inline). |
