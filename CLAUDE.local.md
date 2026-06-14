@@ -140,7 +140,8 @@ Cuando el usuario te corrige (después de output sustancial mío):
 
 | Trigger | Skill OBLIGATORIA (primero) | Por qué |
 |---------|------------------------------|---------|
-| Feature/refactor nuevo con spec **difusa** | `/grill-me` → emitir validation contracts (aserciones testables) | Ambigüedad = 0 antes de diseñar; el contrato alimenta TDD y el validator |
+| Idea **sin formar** (el QUÉ o el CÓMO abierto; varios enfoques plausibles; request multi-subsistema) | `/brainstorm` → diverger, generar 2-3+ enfoques, elegir dirección → luego `/grill-me` | Divergente antes de converger; abre el espacio de solución antes de matar ambigüedad |
+| Feature/refactor nuevo con spec **difusa** (ya sabes el enfoque) | `/grill-me` → emitir validation contracts (aserciones testables) | Ambigüedad = 0 antes de diseñar; el contrato alimenta TDD y el validator |
 | Feature nuevo / nuevo pack / refactor mayor / nueva integración | `/architect` | Diseño y ubicación antes de codear |
 | **Cualquier cambio de comportamiento** (feature, fix, guard) | `/tdd` — test que falla PRIMERO (regla #8/#1) | TDD obligatorio, sin excepciones |
 | **Después de implementar** (toda feature/fix) — **GATE** | `adversarial-review` (o `/code-review`) verificando las aserciones del contrato | Validator independiente (patrón creator-verifier de Factory) |
