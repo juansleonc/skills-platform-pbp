@@ -7,14 +7,15 @@ disable-model-invocation: false
 
 > **📋 Config Priority**: `CLAUDE.local.md` overrides `CLAUDE.md` for local settings (Docker, linting, coverage). Always check both files for current project conventions.
 
-## When to Use This Skill
+## When to Use
 
-Run this skill when:
-- **Reviewing PRs** with significant model/controller changes (>50 lines changed)
-- **Before refactoring** to identify what needs improvement
-- **After adding features** to validate structural quality hasn't degraded
-- **Quarterly audits** to track codebase health trends
-- **When `/rails-audit` runs** in code-quality mode
+**Auto-trigger** (CLAUDE.local.md Skill Router): run this skill whenever:
+- A PR changes a model > 200 lines (warn) or > 400 lines (critical)
+- You're about to refactor a god class or fat model
+- A file has appeared in `git log --follow` > 5 times in the last 6 months (high churn)
+- `/rails-audit` reports a structural smell in models or services
+
+Run BEFORE starting a refactor, not after — the report shapes the design.
 
 ## Shared References
 
@@ -190,7 +191,7 @@ Distinguish **behavioral concerns** (good — shared behavior) from **code-slici
 ```bash
 # 18. Find single-model concerns (code-slicing smell)
 for concern in app/models/concerns/*.rb; do
-  name=$(ruby -e "puts ARGV[0].split('_').map(&:capitalize).join" "$(basename "$concern" .rb)")
+  name=$(bin/d ruby -e "puts ARGV[0].split('_').map(&:capitalize).join" "$(basename "$concern" .rb)")
   refs=$(grep -rln "include.*${name}" app/models/ --include="*.rb" 2>/dev/null | grep -v concerns/ | wc -l | tr -d ' ')
   if [ "$refs" -le 1 ]; then
     echo "⚠️ Single-model concern: $concern (used by $refs model)"
@@ -453,15 +454,4 @@ This skill works with:
 
 > "Every day we must improve" - 改善
 
-**While executing this skill**, if you discover:
-- A new code smell pattern specific to PBP
-- A better detection heuristic
-- A missing threshold
-
-**You MUST**:
-1. Complete the current code smells audit first
-2. Then append improvements to this skill file using Edit tool
-3. Format: `<!-- Kaizen: YYYY-MM-DD --> New content`
-
-**Recent Improvements**:
-<!-- Kaizen entries will be added here -->
+**While executing this skill**, if you discover a new smell pattern, a better heuristic, or a missing threshold — append it to **[kaizen_log.md](kaizen_log.md)** (sibling file). Promote to the skill body only if it changes detection logic or thresholds.
