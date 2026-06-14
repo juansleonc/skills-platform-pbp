@@ -5,20 +5,25 @@ allowed-tools: [Bash, Read, Grep, Glob, Edit]
 disable-model-invocation: false
 ---
 
-> **📋 Config Priority**: `CLAUDE.local.md` overrides `CLAUDE.md` for local settings (Docker, linting, coverage). Always check both files for current project conventions.
+> **Config Priority**: `CLAUDE.local.md` overrides `CLAUDE.md` for local settings (Docker, linting, coverage). Always check both files for current project conventions.
 
-## When to Use This Skill
+## When to Use
 
-Run this skill when:
-- **Creating new Action Policy policies** (validate structure, deny-all defaults, relation_scope)
-- **Migrating a controller** from CanCanCan to AuthorizedController (verify authorization calls, context, verification hooks)
-- **Reviewing PRs** that touch `app/policies/`, `authorized_controller.rb`, or controllers inheriting from `AuthorizedController`
-- **Adding authorization context** to controllers or policies (validate optional/required context keys)
-- **Writing policy or controller specs** (validate correct error classes, matchers, test patterns)
+**Auto-trigger** (CLAUDE.local.md Skill Router): run this skill whenever:
+- Adding or modifying files under `app/policies/**` or `packs/*/app/policies/**`
+- Touching policy-related files in `packs/orgs`, `packs/internal_backend`, or `packs/billing`
+- Creating a new API endpoint, WebSocket channel, or Sidekiq job that exposes admin/internal functionality (authorization parity — CLAUDE.md rule #12)
+- Reviewing a PR that changes permission logic
+
+> Note: the glob `*authorized_controller*` in the Skill Router no longer matches any real file.
+> The real controller surfaces are `packs/orgs/app/controllers/api/v1/base_controller.rb` and
+> `packs/internal_backend/app/controllers/internal/base_controller.rb`. Treat any change to those
+> files as a trigger for this skill.
+
+**Gate**: If authorization checks in a new endpoint are weaker than the UI that calls it, this is a blocker — do not merge.
 
 ## Shared References
 
-> - [Authorization Architecture](docs/architecture/authorization-pundit.md) - comprehensive guide
 > - [Critical Rules](../shared/critical-rules.md) - security rules
 > - [Forbidden Patterns](../shared/forbidden-patterns.md) - patterns to avoid
 > - Use `Grep` and `Glob` for policy hierarchy and reference lookup (Serena removed 2026-06-02)
@@ -26,93 +31,127 @@ Run this skill when:
 
 # Action Policy Validation Skill
 
-Validates Action Policy implementations follow project conventions, ensure correct coexistence with CanCanCan, and match the patterns established in the Orgs authorization slice.
+Validates Action Policy implementations follow project conventions, ensure correct coexistence with CanCanCan, and match the patterns established in the two real authorization slices: `packs/orgs` (Org-member API) and `packs/internal_backend` (internal admin).
 
 ## Architecture Overview
+
+The repo uses `action_policy = 0.7.6` (confirmed: `Gemfile` line 104). Action Policy is **not** wired into `ApplicationController` — it lives exclusively in two pack base controllers:
 
 ```
 ApplicationController
 |  rescue_from CanCan::AccessDenied          <- CanCanCan error handling
 |  NO ActionPolicy::Controller               <- CRITICAL: not included here
 |
-+-- CanCanCan controllers (86+)              <- Unchanged, use Ability/ApiAbility
++-- CanCanCan controllers (app/controllers, most packs)
 |   +-- load_and_authorize_resource
 |   +-- authorize! / can?
 |
-+-- AuthorizedController                     <- Action Policy base controller
++-- packs/orgs/app/controllers/api/v1/base_controller.rb  (Orgs::Api::V1::BaseController)
 |   |  include ActionPolicy::Controller
 |   |  authorize :user, through: :current_user
-|   |  verify_authorized except: :index
-|   |  verify_authorized_scoped only: :index
-|   |  rescue_from ActionPolicy::Unauthorized
+|   |  authorize :permission_resolver, through: :org_permission_resolver
+|   |  rescue_from ActionPolicy::Unauthorized, with: :forbidden
+|   |  # permission_resolver built from membership's OrgRole
 |   |
-|   +-- Action Policy controllers            <- Inherit from AuthorizedController
-|       +-- authorize! @record               <- Per-action authorization
-|       +-- authorized_scope(Model.all)      <- Scoped queries
+|   +-- Orgs API controllers
+|       +-- authorize!(Resource, with: Orgs::XxxPolicy)
+|       +-- authorized_scope(Model.all, with: Orgs::XxxPolicy)
+|
++-- packs/internal_backend/app/controllers/internal/base_controller.rb  (Internal::BaseController)
+|   |  include ActionPolicy::Controller
+|   |  authorize :user, through: :current_user
+|   |  authorize :permission_resolver, through: :permission_resolver
+|   |  verify_authorized                    <- every action must call authorize!
+|   |  rescue_from ActionPolicy::Unauthorized, with: :handle_unauthorized
+|   |  # permission_resolver built from InternalPolicyAssignment + InternalRole
+|   |
+|   +-- Internal admin controllers
+|       +-- authorize!(Resource, with: Internal::XxxPolicy)
+|       +-- authorized_scope(Model.all, with: Internal::XxxPolicy)
 |
 +-- Api::V1::ApiMainController               <- Uses ApiAbility, unaffected
-|   +-- ~93 API controllers
+|   +-- ~110 API controllers
 |
 +-- GraphqlController                        <- Custom token auth, no CanCanCan/ActionPolicy
 ```
+
+### Real Policy Locations
+
+| Slice | Base policy | Domain policies | PermissionResolver |
+|-------|------------|----------------|--------------------|
+| Orgs API | `packs/orgs/app/policies/base_policy.rb` (`Orgs::BasePolicy`) | `packs/orgs/app/policies/` | `packs/orgs/app/services/permission_resolver.rb` (`Orgs::PermissionResolver`) |
+| Internal admin | `packs/internal_backend/app/policies/internal/base_policy.rb` (`Internal::BasePolicy`) | `packs/internal_backend/app/policies/internal/` | `packs/internal_backend/app/services/internal/permission_resolver.rb` (`Internal::PermissionResolver`) |
+| Billing | `packs/billing/app/policies/billing/` and `packs/billing/app/policies/internal/` | — | (`Billing::FacilityBillingPolicy` is a plain Ruby object, not `ActionPolicy::Base`) |
+
+> `app/policies/` in the main app contains only `user_password_update_policy.rb` (a thin, unrelated file). There is no `ApplicationPolicy < ActionPolicy::Base` in the main app — do not grep there for base classes.
 
 ## Validation Checklist
 
 ### 1. Policy Structure
 
 ```bash
-# Grep for correct base class
-grep -rn "< ApplicationPolicy" app/policies/
-# ApplicationPolicy MUST extend ActionPolicy::Base
-grep -n "< ActionPolicy::Base" app/policies/application_policy.rb
+# Find all ActionPolicy base class policies
+grep -rn "< ActionPolicy::Base" packs/orgs/app/policies/ packs/internal_backend/app/policies/
+
+# Find all domain policies in both slices
+ls packs/orgs/app/policies/
+ls packs/internal_backend/app/policies/internal/
+
+# Find all policies across packs (excludes node_modules)
+grep -rn "class.*Policy" packs/*/app/policies/ --include="*.rb" | grep -v node_modules
 ```
 
-> Use `Grep` and `Glob` for symbol-level discovery. (Serena removed 2026-06-02.)
->
-> **📖 See [ast-grep Patterns](../shared/ast-grep-patterns.md)** when `sg` is installed: `sg run --lang ruby --pattern 'can $ACTION, $MODEL' --json=stream` extracts every CanCanCan rule with structured `ACTION`/`MODEL` captures (catches multi-line `can [...]` blocks grep misses). Otherwise this grep is the right tool.
-
-**CORRECT patterns**:
+**CORRECT patterns (Orgs slice)** — non-obvious parts only; `grep -n '' packs/orgs/app/policies/base_policy.rb` for the full class:
 ```ruby
-# app/policies/application_policy.rb
-class ApplicationPolicy < ActionPolicy::Base
-  # CRITICAL: allow_nil so unauthenticated requests get redirect/403, not 500
-  authorize :user, allow_nil: true
+# packs/orgs/app/policies/base_policy.rb  (key declarations)
+class BasePolicy < ActionPolicy::Base
+  include ActionPolicy::Policy::CachedApply
+  authorize :user
+  authorize :permission_resolver
 
-  authorize :organization, optional: true
-  authorize :membership, optional: true
+  pre_check :allow_platform_admin!   # short-circuit for app_admin?
+  pre_check :allow_wildcard!         # short-circuit for wildcard OrgRole
 
-  # Action Policy only aliases new? -> create? by default.
-  # edit? -> update? must be declared explicitly.
-  alias_rule :edit?, to: :update?
+  default_rule :default?             # fallback: deny!(:no_permission)
 
-  def index? = false
-  def show? = false
-  def create? = false
-  def update? = false
-  def destroy? = false
+  # Helper used by all domain policies — the ONLY way to check permissions
+  def permitted?(permission)
+    permission_resolver.can?(permission) || deny!(:insufficient_permission)
+  end
+
+  def permitted_any?(*permissions)
+    permissions.any? { |p| permission_resolver.can?(p) } || deny!(:insufficient_permission)
+  end
 end
 
-# app/policies/orgs/organization_policy.rb
-module Orgs
-  class OrganizationPolicy < ApplicationPolicy
-    relation_scope do |relation|
-      Authorization::ScopeResolver.organizations(user: user, scope: relation)
-    end
+# Domain policy example:
+class FacilityPolicy < BasePolicy
+  def view? = permitted?('facilities.view')
+  alias_rule :index?, :show?, to: :view?
+end
+```
 
-    def show?
-      allowed?(action: :show, role: organization_role)
-    end
+**CORRECT patterns (Internal slice)** — non-obvious parts only; `grep -n '' packs/internal_backend/app/policies/internal/base_policy.rb` for the full class:
+```ruby
+# packs/internal_backend/app/policies/internal/base_policy.rb  (key declarations)
+class BasePolicy < ActionPolicy::Base
+  authorize :permission_resolver      # no :user authorization declared here
 
-    private
+  pre_check :allow_platform_admins   # short-circuit for wildcard InternalRole
 
-    def allowed?(action:, role:)
-      Authorization::PermissionMatrix.allowed?(resource: :organization, action: action, role: role)
-    end
+  default_rule :manage?              # fallback: deny!(:no_permission)
 
-    def role_resolver
-      @role_resolver ||= Authorization::RoleResolver.new(user: user)
-    end
+  def permitted?(permission)
+    return true if permission_resolver.can?(permission)
+    deny!(:insufficient_permission)
   end
+end
+
+# Domain policy example (one-liner syntax):
+class FacilityPolicy < BasePolicy
+  alias_rule :index?, :show?, to: :view?
+  def view?    = permitted?('facilities.list')
+  def create?  = permitted?('facilities.create')
 end
 ```
 
@@ -130,35 +169,29 @@ class Scope < ApplicationPolicy::Scope
     scope.where(...)
   end
 end
-
-# WRONG: Plain Ruby class (not ActionPolicy::Base)
-class ApplicationPolicy
-  attr_reader :user, :record
-end
 ```
 
 ### 2. Controller Authorization Calls
 
 ```bash
-# Check for correct authorize! usage (Action Policy)
-grep -rn "authorize!" app/controllers/ packs/*/app/controllers/
-# Check for WRONG authorize usage (Pundit style)
-grep -rn "^\s*authorize[^!_]" app/controllers/ packs/*/app/controllers/ | grep -v "authorize_"
+# Check for correct authorize! usage in both pack controller trees
+grep -rn "authorize!" packs/orgs/app/controllers/ packs/internal_backend/app/controllers/
+
+# Check for WRONG Pundit-style authorize (no bang) — should find nothing
+grep -rn "^\s*authorize[^!_:]" packs/*/app/controllers/ --include="*.rb" | grep -v "authorize_"
 ```
 
 **CORRECT**:
 ```ruby
-# Action Policy: authorize! with bang
-authorize! @organization, to: :show?, with: Orgs::OrganizationPolicy
+# Explicit policy class — preferred in this codebase
+authorize!(Facility, with: Orgs::FacilityPolicy)
+authorize!(@role, with: Orgs::RolePolicy)
 
-# Implicit rule from action name
-authorize! @organization, with: Orgs::OrganizationPolicy
+# Explicit rule override
+authorize!(:job, to: :index?, with: Internal::JobPolicy)
 
 # Scoped collection
-@orgs = authorized_scope(Orgs::Organization.all, type: :active_record_relation, with: Orgs::OrganizationPolicy)
-
-# Permission check (no exception)
-allowed_to?(:update?, @organization, with: Orgs::OrganizationPolicy)
+logs = authorized_scope(InternalAuditLog.all, with: Internal::AuditLogPolicy)
 ```
 
 **FORBIDDEN**:
@@ -168,36 +201,60 @@ authorize @organization, :show?, policy_class: Orgs::OrganizationPolicy
 
 # WRONG: Pundit-style policy_scope
 policy_scope(Orgs::Organization)
-
-# WRONG: Pundit-style policy helper
-policy(@organization).show?
 ```
 
 ### 3. Controller Setup
 
 ```bash
-# Verify ActionPolicy::Controller only in AuthorizedController
-grep -rn "ActionPolicy::Controller" app/controllers/
-# Should ONLY appear in authorized_controller.rb
+# Verify ActionPolicy::Controller only in the two pack base controllers
+grep -rn "ActionPolicy::Controller" packs/*/app/controllers/ --include="*.rb"
+# Expected: only base_controller.rb in packs/orgs and packs/internal_backend
+
+# Verify ApplicationController does NOT include ActionPolicy::Controller
+grep -n "ActionPolicy" app/controllers/application_controller.rb
 ```
 
-**CORRECT**:
+**CORRECT (Orgs)**:
 ```ruby
-# app/controllers/authorized_controller.rb
-class AuthorizedController < ApplicationController
-  include ActionPolicy::Controller
-  authorize :user, through: :current_user
-  verify_authorized except: :index
-  verify_authorized_scoped only: :index
-  rescue_from ActionPolicy::Unauthorized, with: :user_not_authorized
-end
+# packs/orgs/app/controllers/api/v1/base_controller.rb
+module Orgs::Api::V1
+  class BaseController < ApplicationController
+    include ActionPolicy::Controller
 
-# Orgs API overrides scoped verification (uses ScopeResolver instead)
-class Orgs::Api::V1::BaseController < AuthorizedController
-  authorize :organization, through: :current_organization
-  authorize :membership, through: :current_membership
-  skip_verify_authorized_scoped
-  verify_authorized  # all actions, including index
+    authorize :user, through: :current_user
+    authorize :permission_resolver, through: :org_permission_resolver
+
+    rescue_from ActionPolicy::Unauthorized, with: :forbidden
+
+    private
+
+    def org_permission_resolver
+      @org_permission_resolver ||= Orgs::PermissionResolver.new(@membership&.org_role ? @membership : nil)
+    end
+  end
+end
+```
+
+**CORRECT (Internal)**:
+```ruby
+# packs/internal_backend/app/controllers/internal/base_controller.rb
+module Internal
+  class BaseController < ApplicationController
+    include ActionPolicy::Controller
+
+    authorize :user, through: :current_user
+    authorize :permission_resolver, through: :permission_resolver
+
+    verify_authorized   # every action must call authorize!
+
+    rescue_from ActionPolicy::Unauthorized, with: :handle_unauthorized
+
+    private
+
+    def permission_resolver
+      @permission_resolver ||= Internal::PermissionResolver.new(admin_user)
+    end
+  end
 end
 ```
 
@@ -207,119 +264,95 @@ end
 class ApplicationController < ActionController::Base
   include ActionPolicy::Controller  # NO! This breaks CanCanCan isolation
 end
-
-# WRONG: Pundit include
-class AuthorizedController < ApplicationController
-  include Pundit::Authorization  # NO! We use Action Policy now
-end
 ```
 
 ### 4. Authorization Context
 
 ```bash
-# Check context declarations
-grep -rn "authorize :" app/policies/ app/controllers/ packs/*/app/controllers/ | grep -v "authorize!"
+# Check context declarations in pack controllers and policies
+grep -rn "authorize :" packs/orgs/app/policies/ packs/orgs/app/controllers/ --include="*.rb" | grep -v "authorize!"
+grep -rn "authorize :" packs/internal_backend/app/policies/ packs/internal_backend/app/controllers/ --include="*.rb" | grep -v "authorize!"
 ```
 
-**Rules**:
-- `user` is declared in `AuthorizedController` via `authorize :user, through: :current_user`
-- `organization` and `membership` are optional in `ApplicationPolicy`
-- Controllers that have org/membership context must declare `authorize :organization, through: :method`
-- Contexts that can be nil MUST use `optional: true` in the policy
+**Rules for Orgs slice**:
+- `user` — declared via `authorize :user` in `Orgs::BasePolicy`; provided via `current_user` in `BaseController`
+- `permission_resolver` — declared via `authorize :permission_resolver` in `Orgs::BasePolicy`; provided via `org_permission_resolver` (builds `Orgs::PermissionResolver` from current membership's `OrgRole`)
 
-**CORRECT**:
-```ruby
-# In policy (optional context)
-class ApplicationPolicy < ActionPolicy::Base
-  authorize :organization, optional: true
-  authorize :membership, optional: true
-end
-
-# In controller (providing context)
-class Orgs::Api::V1::BaseController < AuthorizedController
-  authorize :organization, through: :current_organization
-  authorize :membership, through: :current_membership
-
-  private
-
-  def current_organization
-    @organization
-  end
-
-  def current_membership
-    @membership
-  end
-end
-```
+**Rules for Internal slice**:
+- `permission_resolver` — declared via `authorize :permission_resolver` in `Internal::BasePolicy`; provided via `Internal::PermissionResolver.new(admin_user)` (resolves from `InternalPolicyAssignment` + `InternalRole`)
+- `user` — provided via `current_user` (passed as context but not declared in the base policy directly — resolved through the controller's `authorize :user, through: :current_user`)
 
 ### 5. Error Handling
 
 ```bash
-# Verify correct error class
-grep -rn "ActionPolicy::Unauthorized" app/controllers/
-grep -rn "Pundit::NotAuthorizedError" app/controllers/  # Should find NOTHING
+# Verify correct error class in pack controllers
+grep -rn "ActionPolicy::Unauthorized" packs/*/app/controllers/ --include="*.rb"
+grep -rn "Pundit::NotAuthorizedError" packs/*/app/controllers/ --include="*.rb"  # Should find NOTHING
 ```
 
 **CORRECT**:
 ```ruby
-rescue_from ActionPolicy::Unauthorized, with: :user_not_authorized
+# Orgs slice
+rescue_from ActionPolicy::Unauthorized, with: :forbidden
 
-def user_not_authorized(exception)
-  log_authorization_failure(exception)
-  # exception.policy  -> policy instance
-  # exception.rule    -> the rule that failed (e.g., :show?)
-  # exception.record  -> the record being authorized
+def forbidden
+  render json: { error: 'Access denied' }, status: :forbidden
+end
+
+# Internal slice (with denial reasons)
+rescue_from ActionPolicy::Unauthorized, with: :handle_unauthorized
+
+def handle_unauthorized(exception)
+  details = exception.result.reasons.to_h.flat_map { |_, v| v }.uniq
+  render(json: {
+    error: 'You do not have permission to perform this action',
+    details: details
+  }, status: :forbidden)
 end
 ```
 
 **Error classes reference**:
-| Error | When | Equivalent Pundit |
-|-------|------|-------------------|
-| `ActionPolicy::Unauthorized` | `authorize!` denies access | `Pundit::NotAuthorizedError` |
-| `ActionPolicy::UnauthorizedAction` | `verify_authorized` fails (forgot `authorize!`) | `Pundit::AuthorizationNotPerformedError` |
-| `ActionPolicy::UnscopedAction` | `verify_authorized_scoped` fails (forgot `authorized_scope`) | `Pundit::PolicyScopingNotPerformedError` |
-| `ActionPolicy::AuthorizationContextMissing` | Required context not provided | N/A |
+| Error | When |
+|-------|------|
+| `ActionPolicy::Unauthorized` | `authorize!` denies access |
+| `ActionPolicy::UnauthorizedAction` | `verify_authorized` fails (forgot `authorize!`) |
+| `ActionPolicy::UnscopedAction` | `verify_authorized_scoped` fails (forgot `authorized_scope`) |
+| `ActionPolicy::AuthorizationContextMissing` | Required context not provided |
 
-### 6. Verification Hooks
+### 6. PermissionResolver Pattern
 
-**CORRECT**:
+Both slices use a `PermissionResolver` service object (not an Action Policy built-in) to decouple permission lookup from policy logic. The resolver is built in the controller and injected as authorization context.
+
+**Orgs::PermissionResolver** (`packs/orgs/app/services/permission_resolver.rb`):
+- Initialized with an `Orgs::Membership`
+- Resolves permissions from `membership.org_role.permissions`
+- Wildcard role (`role.wildcard?`) → `['*']` → bypasses all checks via `allow_wildcard!` pre-check
+- Also resolves facility scope (`scoped_facility_ids`) for data isolation
+
+**Internal::PermissionResolver** (`packs/internal_backend/app/services/internal/permission_resolver.rb`):
+- Initialized with a user
+- Resolves permissions from `InternalPolicyAssignment` + `InternalRole` (single DB query, cached)
+- Wildcard internal role → `['*']` → bypasses via `allow_platform_admins` pre-check
+
 ```ruby
-# Standard: index uses scope, others use authorize!
-verify_authorized except: :index
-verify_authorized_scoped only: :index
-
-# API controllers that use ScopeResolver instead of authorized_scope
-skip_verify_authorized_scoped
-verify_authorized  # for ALL actions including index
-
-# Skip for specific actions
-skip_verify_authorized only: :health_check
-
-# Skip dynamically within an action
-def public_page
-  skip_verify_authorized!
-  # ...
-end
+# Both resolvers expose the same interface:
+resolver.can?('resource.action')   # => true/false
+resolver.permissions               # => ['resource.action', ...] or ['*']
 ```
 
 ### 7. Relation Scopes
 
-**CORRECT** (Action Policy pattern):
 ```ruby
-class OrganizationPolicy < ApplicationPolicy
-  # Default relation scope
-  relation_scope do |relation|
-    Authorization::ScopeResolver.organizations(user: user, scope: relation)
-  end
+# In Orgs::BasePolicy (default: all records visible to org members)
+scope_for :active_record_relation, &:all
 
-  # Named scope (if needed)
-  scope_for :relation, :own do |relation|
-    relation.where(owner: user)
-  end
+# Override in domain policy for filtered scopes:
+scope_for :active_record_relation do |relation|
+  relation.where(organization: permission_resolver.scoped_facility_ids)
 end
 
 # In controller
-@orgs = authorized_scope(Orgs::Organization.all, type: :active_record_relation, with: Orgs::OrganizationPolicy)
+@records = authorized_scope(Model.all, with: Orgs::XxxPolicy)
 ```
 
 **FORBIDDEN** (Pundit pattern):
@@ -337,70 +370,72 @@ end
 
 ### 8. Testing Patterns
 
-**Policy specs**:
+**Orgs policy specs** (use `OrgPolicyHelpers`):
 ```ruby
-RSpec.describe Orgs::OrganizationPolicy do
-  let(:user) { build_stubbed(:user) }
-  let(:organization) { build_stubbed(:organization) }
-  let(:policy) { described_class.new(record: organization, user: user) }
+# packs/orgs/spec/policies/facility_policy_spec.rb pattern
+require_relative 'support/org_policy_helpers'
 
-  describe '#show?' do
-    context 'when platform admin' do
-      let(:user) { build_stubbed(:user, :admin) }
-      it { expect(policy).to be_show }
-    end
+RSpec.describe Orgs::FacilityPolicy do
+  include OrgPolicyHelpers
 
-    context 'when no user' do
-      let(:user) { nil }
-      it { expect(policy).not_to be_show }
-    end
+  let(:plain_user)     { build(:user) }
+  let(:platform_admin) { build(:user, :admin) }
+  let(:record)         { build(:organization) }
+
+  def policy(permissions, user: plain_user)
+    resolver = build_resolver(permissions)
+    described_class.new(record, user: user, permission_resolver: resolver)
   end
 
-  describe 'relation_scope' do
-    let(:scope) { Orgs::Organization.all }
-    # Test via ScopeResolver specs, not policy scope directly
+  describe '#view?' do
+    it 'allows with facilities.view' do
+      expect(policy(['facilities.view']).apply(:view?)).to be(true)
+    end
+
+    it 'denies without facilities.view' do
+      expect(policy(['org.view']).apply(:view?)).to be(false)
+    end
+
+    it 'allows platform admin' do
+      expect(policy([], user: platform_admin).apply(:view?)).to be(true)
+    end
   end
 end
 ```
 
-**Controller authorization specs**:
-```ruby
-RSpec.describe AuthorizedController, type: :controller do
-  # Test ActionPolicy::UnauthorizedAction when authorize! not called
-  it 'raises when authorize! is not called' do
-    expect { post :create }.to raise_error(ActionPolicy::UnauthorizedAction)
-  end
+**IMPORTANT**: Always use `policy.apply(:rule?)`, not `policy.rule?` directly. The direct call
+uses Action Policy's throw/catch control flow and will raise outside the policy's execution context.
 
-  # Test ActionPolicy::Unauthorized rescue
-  it 'returns 404 for signed-in unauthorized users' do
-    expect { get :show, params: { id: 1 } }.to raise_error(ActionController::RoutingError)
+**Internal policy specs** (use `describe_rule` / `succeed` / `failed` DSL):
+```ruby
+RSpec.describe Internal::FacilityPolicy, type: :policy do
+  let(:record) { build_stubbed(:facility) }
+
+  describe_rule :view? do
+    succeed 'with facilities.list permission' do
+      let(:context) { internal_policy_context(create_internal_admin(:operations)) }
+    end
+
+    failed 'without facilities.list permission' do
+      let(:context) { internal_policy_context(create_internal_admin(:finance)) }
+    end
   end
 end
 ```
 
-**Coexistence specs**:
+**Coexistence validation**:
 ```ruby
-RSpec.describe 'CanCanCan and Action Policy coexistence' do
-  describe 'ApplicationController' do
-    it 'does NOT include ActionPolicy::Controller' do
-      expect(ApplicationController.ancestors).not_to include(ActionPolicy::Controller)
-    end
-
-    it 'handles CanCan::AccessDenied' do
-      handlers = ApplicationController.rescue_handlers.map(&:first)
-      expect(handlers).to include('CanCan::AccessDenied')
-    end
+describe 'ActionPolicy isolation' do
+  it 'ApplicationController does NOT include ActionPolicy::Controller' do
+    expect(ApplicationController.ancestors).not_to include(ActionPolicy::Controller)
   end
 
-  describe 'AuthorizedController' do
-    it 'includes ActionPolicy::Controller' do
-      expect(AuthorizedController.ancestors).to include(ActionPolicy::Controller)
-    end
+  it 'Orgs::Api::V1::BaseController includes ActionPolicy::Controller' do
+    expect(Orgs::Api::V1::BaseController.ancestors).to include(ActionPolicy::Controller)
+  end
 
-    it 'handles ActionPolicy::Unauthorized' do
-      handlers = AuthorizedController.rescue_handlers.map(&:first)
-      expect(handlers).to include('ActionPolicy::Unauthorized')
-    end
+  it 'Internal::BaseController includes ActionPolicy::Controller' do
+    expect(Internal::BaseController.ancestors).to include(ActionPolicy::Controller)
   end
 end
 ```
@@ -411,25 +446,26 @@ Run these to validate any Action Policy implementation:
 
 ```bash
 # 1. No Pundit references in new/migrated code
-grep -rn "Pundit" app/policies/ packs/*/app/policies/ --include="*.rb" | grep -v "_spec.rb"
+grep -rn "Pundit" packs/*/app/policies/ packs/*/app/controllers/ --include="*.rb" | grep -v "_spec.rb" | grep -v node_modules
 
 # 2. No policy_scope usage (Pundit)
-grep -rn "policy_scope" app/controllers/ packs/*/app/controllers/ --include="*.rb"
+grep -rn "policy_scope" packs/*/app/controllers/ --include="*.rb"
 
-# 3. No authorize without bang (Pundit style) - exclude authorize_access! etc.
-grep -rn "^\s*authorize " app/controllers/ packs/*/app/controllers/ --include="*.rb" | grep -v "authorize!" | grep -v "authorize_" | grep -v "authorize :"
+# 3. No authorize without bang (Pundit style)
+grep -rn "^\s*authorize " packs/*/app/controllers/ --include="*.rb" | grep -v "authorize!" | grep -v "authorize_" | grep -v "authorize :"
 
 # 4. No inner Scope classes (Pundit pattern)
-grep -rn "class Scope" app/policies/ --include="*.rb"
+grep -rn "class Scope" packs/*/app/policies/ --include="*.rb"
 
-# 5. ActionPolicy::Controller only in AuthorizedController
-grep -rn "ActionPolicy::Controller" app/controllers/ packs/*/app/controllers/ --include="*.rb"
+# 5. ActionPolicy::Controller only in the two pack base controllers
+grep -rn "ActionPolicy::Controller" packs/*/app/controllers/ --include="*.rb"
+# Expected: packs/orgs/.../base_controller.rb and packs/internal_backend/.../base_controller.rb
 
-# 6. No Pundit gem reference (after migration)
+# 6. No Pundit gem reference
 grep -n "pundit" Gemfile | grep -v "#"
 
-# 7. Verify all policies inherit from ApplicationPolicy
-grep -rn "< ApplicationPolicy\|< ActionPolicy::Base" app/policies/ --include="*.rb"
+# 7. Verify policies inherit from the correct base class
+grep -rn "< ActionPolicy::Base\|< BasePolicy\|< Orgs::BasePolicy\|< Internal::BasePolicy" packs/*/app/policies/ --include="*.rb" | grep -v node_modules
 ```
 
 ## Quick Validation Workflow
@@ -437,53 +473,42 @@ grep -rn "< ApplicationPolicy\|< ActionPolicy::Base" app/policies/ --include="*.
 ```bash
 # Run all checks at once
 echo "=== Checking for Pundit leftovers ==="
-grep -rn "Pundit\|policy_scope\|pundit_user" app/policies/ app/controllers/ packs/*/app/policies/ packs/*/app/controllers/ --include="*.rb" | grep -v "_spec.rb" | grep -v "# " || echo "OK: No Pundit references"
+grep -rn "Pundit\|policy_scope\|pundit_user" packs/*/app/policies/ packs/*/app/controllers/ --include="*.rb" | grep -v "_spec.rb" | grep -v node_modules || echo "OK: No Pundit references"
 
 echo "=== Checking Action Policy isolation ==="
-grep -rn "ActionPolicy::Controller" app/controllers/ packs/*/app/controllers/ --include="*.rb" | grep -v "authorized_controller.rb" && echo "WARNING: ActionPolicy::Controller found outside AuthorizedController" || echo "OK: Properly isolated"
+grep -rn "ActionPolicy::Controller" packs/*/app/controllers/ --include="*.rb" | grep -v node_modules
 
 echo "=== Checking policy inheritance ==="
-grep -rn "class.*Policy" app/policies/ --include="*.rb" | grep -v "< ApplicationPolicy\|< ActionPolicy::Base\|module\|# " && echo "WARNING: Policy not inheriting from ApplicationPolicy" || echo "OK: All policies inherit correctly"
+grep -rn "class.*Policy" packs/*/app/policies/ --include="*.rb" | grep -v "< ActionPolicy::Base\|< BasePolicy\|module\|# " | grep -v node_modules && echo "WARNING: Policy not inheriting from correct base" || echo "OK"
 
-echo "=== Running specs ==="
-bin/d rspec spec/policies/ spec/controllers/authorized_controller_spec.rb spec/controllers/cancancan_coexistence_spec.rb
+echo "=== Running Orgs policy specs ==="
+bin/d rspec packs/orgs/spec/policies/
+
+echo "=== Running Internal policy specs ==="
+bin/d rspec packs/internal_backend/spec/policies/
 ```
-
-## PermissionMatrix Pattern
-
-All org-hierarchy policies delegate authorization decisions to `Authorization::PermissionMatrix`:
-
-```ruby
-# Pattern used in all org policies
-private
-
-def allowed?(action:, role:)
-  Authorization::PermissionMatrix.allowed?(resource: :resource_name, action: action, role: role)
-end
-
-def organization_role
-  return :none unless user
-  role_resolver.organization_role(record_organization)
-end
-
-def role_resolver
-  @role_resolver ||= Authorization::RoleResolver.new(user: user)
-end
-```
-
-This keeps business rules centralized in `PermissionMatrix` and avoids duplicating role logic in each policy.
 
 ## Migration Checklist: CanCanCan Controller to Action Policy
 
-1. Create `app/policies/<model>_policy.rb` inheriting from `ApplicationPolicy`
-2. Define rules using `PermissionMatrix` delegation pattern
-3. Add `relation_scope` block if controller has `index` action
-4. Change controller parent: `< ApplicationController` -> `< AuthorizedController`
-5. Replace `load_and_authorize_resource` with explicit `authorize!` calls
-6. Replace `accessible_by(current_ability)` with `authorized_scope(Model.all, type: :active_record_relation)`
-7. Replace view `can?(:action, record)` with `allowed_to?(:action?, record)`
-8. Declare authorization contexts if needed: `authorize :organization, through: :method`
-9. Remove corresponding rules from Ability class
-10. Write policy specs + update controller specs
-11. Run `bin/d rspec` for affected files
+1. Identify which pack the controller belongs to (Orgs API or Internal admin)
+2. Create `packs/<pack>/app/policies/<namespace>/<model>_policy.rb` inheriting from the correct base
+3. Define rules using `permitted?('resource.action')` delegation pattern
+4. Add `scope_for :active_record_relation` block if controller has `index` action
+5. Ensure controller inherits from the pack's `BaseController` (which already has `include ActionPolicy::Controller`)
+6. Replace `load_and_authorize_resource` with explicit `authorize!(record, with: XxxPolicy)` calls
+7. Replace `accessible_by(current_ability)` with `authorized_scope(Model.all, with: XxxPolicy)`
+8. Replace view `can?(:action, record)` with `allowed_to?(:action?, record, with: XxxPolicy)`
+9. Remove corresponding rules from Ability/ApiAbility class
+10. Write policy specs using the pack's test helpers (`OrgPolicyHelpers` for Orgs, `internal_policy_context` for Internal)
+11. Run `bin/d rspec packs/<pack>/spec/policies/` and `bin/d rspec packs/<pack>/spec/controllers/`
 12. Run `bin/d bundle exec pronto run -r rubocop -c develop -f text`
+
+---
+
+## Unimplemented design stubs (do not grep)
+
+> `AuthorizedController`, `ApplicationPolicy`, `Authorization::PermissionMatrix/ScopeResolver/RoleResolver` — zero repo hits; aspirational only. If introduced, update Architecture Overview and remove this note.
+
+---
+
+> See [kaizen_log.md](kaizen_log.md) for change history.
