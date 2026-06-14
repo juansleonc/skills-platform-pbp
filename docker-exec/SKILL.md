@@ -7,6 +7,10 @@ disable-model-invocation: false
 
 > **📋 Config Priority**: `CLAUDE.local.md` overrides `CLAUDE.md` for local settings (Docker, linting, coverage). Always check both files for current project conventions.
 
+## When to Use
+
+Invoke this skill whenever any Ruby/Rails command is about to run on the host machine. CLAUDE.local.md rule #2 is absolute: **ALL Ruby/Rails commands go through Docker — no exceptions.** `bin/d` is the canonical wrapper. The Makefile targets listed below are a secondary option for commands they cover.
+
 # Docker Execution Environment - MANDATORY
 
 ## CRITICAL RULE
@@ -28,10 +32,10 @@ bin/d rake 'task[args]'
 bin/d rails console
 bin/d rubocop -A file.rb
 
-# Option 2: make targets
+# Option 2: make targets (only 11 real targets — use bin/d for everything else)
 make test TEST_PATH=spec/models/user_spec.rb
 make console
-make rubocop FILE=file.rb
+# Note: make rubocop does NOT exist — use bin/d rubocop -A file.rb
 
 # Option 3: docker compose (most verbose)
 docker compose exec web bundle exec rspec spec/...
@@ -58,46 +62,49 @@ docker compose exec web bundle exec rails console
 
 ## Makefile Quick Reference
 
+The Makefile has **11 real targets** (verified against `Makefile` 2026-06-10). Use `bin/d` for everything else.
+
 | Command | Description |
 |---------|-------------|
-| `make up` | Start all containers |
-| `make down` | Stop all containers |
-| `make status` | Check service health |
-| `make logs-f` | Follow all logs |
-| `make shell` | Bash in web container |
-| `make console` | Rails console |
-| `make test TEST_PATH=...` | Run tests |
-| `make test-parallel` | Run all tests parallel |
-| `make rubocop FILE=...` | Lint file |
-| `make pronto` | Pronto vs develop |
-| `make migrate` | Run migrations |
-| `make coverage` | Coverage delta |
-| `make help` | Show all targets |
+| `make build` | Build Docker image for development |
+| `make build-no-cache` | Build Docker image without cache |
+| `make containers-up` | Start all containers (detached-capable) |
+| `make web-start` | Start containers and attach to web container |
+| `make web-bash` | Open bash shell in web container |
+| `make db-bash` | Open bash shell in database container |
+| `make console` | Rails console in web container |
+| `make migrate` | Run database migrations |
+| `make test [TEST_PATH=...]` | Run rspec (default path: `spec`); accepts TEST_PATH variable |
+| `make assets-precompile` | Precompile assets in web container |
+| `make help` | Show all Makefile targets |
+
+**Fictional targets that do NOT exist** (previously listed in error): `up`, `down`, `status`, `logs-f`, `shell`, `test-parallel`, `rubocop`, `pronto`, `setup`, `touch`, `db-shell`, `redis-cli`, `lint`, `ci`, `coverage`, `seed`, `routes`, `restart`, `brakeman`, `logs-web`, `logs-sidekiq`. Use `bin/d` equivalents for these operations.
 
 ## Detailed Reference
 
 ### Testing
 
 ```bash
-# Single spec file (3 equivalent ways)
+# Single spec file
 bin/d rspec spec/models/user_spec.rb
+# OR via Makefile (TEST_PATH variable accepted):
 make test TEST_PATH=spec/models/user_spec.rb
+# OR verbose:
 docker compose exec -e RAILS_ENV=test web bundle exec rspec spec/models/user_spec.rb
 
 # Multiple files
 bin/d rspec spec/models/ spec/services/
 make test TEST_PATH="spec/models/ spec/services/"
 
-# Parallel tests (full suite)
-bin/d parallel
-make test-parallel
+# Parallel tests (full suite) — no Makefile target; use bin/d directly
+bin/d rails parallel:spec
 
 # Specific test line
 bin/d rspec spec/models/user_spec.rb:45
 make test TEST_PATH=spec/models/user_spec.rb:45
 
 # With coverage report
-make test-coverage TEST_PATH=spec/models/user_spec.rb
+docker compose exec -e SIMPLECOV_REPORT=true -e RAILS_ENV=test web bundle exec rspec spec/models/user_spec.rb
 ```
 
 ### Rake Tasks
@@ -113,7 +120,7 @@ bin/d coverage app/models/user.rb  # Coverage for specific file
 bin/d migrate               # Or: make migrate
 bin/d rollback              # Rollback 1 migration
 bin/d rollback 3            # Rollback 3 migrations
-bin/d seed                  # Or: make seed
+bin/d seed                  # Note: make seed does NOT exist in Makefile — use bin/d seed
 
 # Custom tasks
 bin/d rake 'task_name[args]'
@@ -123,15 +130,16 @@ bin/d rake 'task_name[args]'
 
 ```bash
 # Console
-bin/d rails c               # Or: bin/d c, make console
+bin/d rails c               # Or: bin/d c
+make console                # Real Makefile target (checks container is running first)
 
 # Generators
 bin/d rails generate model User
 bin/d rails generate migration AddFieldToUsers
 
 # Routes
-bin/d routes                # Or: make routes
-make routes GREP=users      # Filter routes
+bin/d routes
+# Note: make routes does NOT exist in Makefile — use bin/d routes
 ```
 
 ### Code Quality
@@ -142,21 +150,19 @@ make routes GREP=users      # Filter routes
 
 ```bash
 # Pronto - for MODIFIED files (only checks changed lines)
-bin/d pronto                # Default: compare vs develop
-make pronto                 # Same as above
-make pronto PRONTO_COMMIT=main  # Compare vs different branch
+# Canonical form (CLAUDE.local.md Rule #3) — always include -r rubocop and -f text:
+bin/d bundle exec pronto run -r rubocop -c develop -f text
+# Note: make pronto does NOT exist in Makefile — use bin/d
 
 # RuboCop - ONLY for NEW files
 bin/d rubocop -A path/to/new_file.rb
-make rubocop FILE=path/to/new_file.rb
+# Note: make rubocop does NOT exist in Makefile — use bin/d
 
 # Brakeman (security)
 bin/d brakeman
-make brakeman
+# Note: make brakeman does NOT exist in Makefile — use bin/d
 
-# All linters
-make lint                   # rubocop + pronto
-make ci                     # Full CI checks
+# Note: make lint and make ci do NOT exist — use bin/d commands individually
 ```
 
 **Why this distinction:**
@@ -168,8 +174,8 @@ make ci                     # Full CI checks
 
 ```bash
 # Open bash in container
-bin/d sh                    # Or: bin/d bash, make shell
-make web-bash
+bin/d sh                    # Or: bin/d bash
+make web-bash               # Real Makefile target
 
 # ONLY INSIDE THE CONTAINER, you can run:
 # bundle exec rspec spec/models/user_spec.rb
@@ -183,38 +189,40 @@ make web-bash
 ```bash
 # MySQL shell
 bin/d db                    # Or: bin/d console-db
-make db-shell
+make db-bash                # Real Makefile target (opens bash in DB container)
+# Note: make db-shell does NOT exist in Makefile — use bin/d db or make db-bash
 
 # Redis CLI
-make redis-cli
+# Note: make redis-cli does NOT exist in Makefile — use: bin/d sh + redis-cli inside container
 ```
 
 ## Container Management
 
 ```bash
-# Start all containers
-make up                     # Creates network if needed
+# Start all containers (real Makefile targets)
+make containers-up          # Start all containers
+make web-start              # Start and attach to web container
 
 # Stop containers
-make down
+# Note: make down does NOT exist — use: docker compose down
 
 # Restart web container
-make restart                # Or: bin/d restart
+# Note: make restart does NOT exist — use: bin/d restart (if supported by bin/d)
 
 # Restart Puma (faster than container restart)
-make touch                  # Touches tmp/restart.txt
+# Note: make touch does NOT exist — use: touch tmp/restart.txt  (from host) or bin/d sh + touch
 
 # Check service health
 bin/d status
-make status
+# Note: make status does NOT exist in Makefile — use bin/d status or docker compose ps
 
 # View logs
-make logs-f                 # Follow all logs
-make logs-web               # Web container only
-make logs-sidekiq           # Sidekiq container
+# Note: make logs-f / make logs-web / make logs-sidekiq do NOT exist in Makefile
+# Use: docker compose logs -f web   OR   docker compose logs -f sidekiq
 
-# First-time setup
-make setup                  # network + build + up + db-setup
+# Build image
+make build                  # Build Docker image (use after Dockerfile changes)
+make build-no-cache         # Build without cache
 ```
 
 ## Environment Variables
@@ -248,62 +256,6 @@ docker compose exec -e DEBUG=true web bundle exec rails console
 
 **You MUST**:
 1. Complete the current task first
-2. Then append improvements to this skill file using Edit tool
-3. Format: `<!-- Kaizen: YYYY-MM-DD --> New content`
+2. Then run `/kaizen` to propose the improvement — do NOT self-edit this skill file mid-execution
 
-**Recent Improvements**:
-
-<!-- Kaizen: 2026-01-24 - bin/d wrapper and expanded Makefile -->
-- Added `bin/d` wrapper script for short Docker commands
-- Expanded Makefile with 50+ targets
-- Updated docker-compose.yml with health checks and profiles
-- Added `.env.example` for new developers
-- Network auto-created (no longer external)
-- Added mailcatcher service (profile: mail)
-- Sidekiq now optional (profile: sidekiq or full)
-
-<!-- Kaizen: 2026-01-23 - Test Production Scripts Locally -->
-## ⚠️ MANDATORY: Test Production Scripts Before Sending
-
-**ALWAYS test scripts in Docker container BEFORE sending to production.**
-
-### Testing Pattern
-
-```bash
-# 1. Test Ruby syntax
-docker compose exec web ruby -c tmp/script.rb
-
-# 2. Test with simulated data (no DB)
-docker compose exec web bundle exec rails runner "
-  # Simulate production data
-  class FakeMembership
-    def id; 123; end
-    def acquired_at; Time.parse('2026-01-19 05:00:00'); end
-    def current_period_end_at; nil; end  # Test nil case!
-  end
-
-  membership = FakeMembership.new
-
-  # Test the actual code
-  now = Time.current.strftime('%Y-%m-%d %H:%M:%S')
-  starts = membership.acquired_at ? membership.acquired_at.strftime('%Y-%m-%d %H:%M:%S') : now
-  ends_at = membership.current_period_end_at ? membership.current_period_end_at.strftime('%Y-%m-%d %H:%M:%S') : (Time.current + 1.year).strftime('%Y-%m-%d %H:%M:%S')
-
-  puts 'now: ' + now
-  puts 'starts: ' + starts
-  puts 'ends_at: ' + ends_at
-
-  # Generate SQL for verification
-  sql = \"INSERT INTO table (a, b, c) VALUES (1, '#{starts}', '#{ends_at}')\"
-  puts 'SQL: ' + sql
-"
-```
-
-### Checklist Before Sending to Production
-
-- [ ] Syntax checked with `ruby -c`
-- [ ] Nil values handled for all date/time fields
-- [ ] Uses `strftime` instead of `to_s(:db)` (Ruby 3 compatible)
-- [ ] No heredocs (use single-line strings)
-- [ ] SQL generated and verified
-- [ ] Commands provided step-by-step (not all at once)
+**Full changelog:** See [`kaizen_log.md`](.claude/skills/docker-exec/kaizen_log.md) in this directory.
