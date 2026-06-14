@@ -39,12 +39,13 @@ This skill ensures all other skills remain aligned with:
 
 ```bash
 # List all installed skills.
-# IMPORTANT: the skill filename casing is MIXED in this repo (most are `SKILL.md`,
-# a few newer ones are `skill.md`). macOS FS is case-insensitive so a glob hides this,
-# but `find -name` is case-SENSITIVE and would undercount. Always use `-iname`.
+# NOTE: the canonical skill filename is UPPERCASE `SKILL.md` (convention is consistent:
+# `find -name 'SKILL.md'` counts all 42 (run `find .claude/skills -iname 'skill.md' | wc -l` for live count; there are 0 lowercase `skill.md` files).
+# Using `-iname` is fine for portability (Linux CI) but is NOT needed to handle mixed casing —
+# mixed casing was fixed; the flag is kept as a defensive cross-platform measure only.
 find .claude/skills -maxdepth 2 -iname "skill.md"
 
-# Count skills
+# Count skills (dynamic — do not hardcode the number)
 find .claude/skills -iname "skill.md" | wc -l
 ```
 
@@ -71,7 +72,7 @@ For each skill, verify:
 | Pronto vs RuboCop | Check linting section | Modified=Pronto, New=RuboCop |
 | Factory rules | Check test patterns | build > build_stubbed > create |
 | Forbidden patterns | Check for violations | None present |
-| Package count | Check packwerk skill | Matches reality (10 packages) |
+| Package count | Check packwerk skill | Matches `ls -d packs/*/ \| wc -l` (dynamic — do not hardcode) |
 | Coverage requirement | Check for 100% | Explicitly stated |
 | Time safety | Check for Time.now | Only Time.current |
 | Claude mentions | Check commits/PRs | No AI references |
@@ -90,21 +91,25 @@ grep -rn "Time\.now" .claude/skills/ --include="*.md" | grep -v "# BAD\|# WRONG\
 grep -rn "bundle exec" .claude/skills/ --include="*.md" | grep -v "docker compose exec\|make test"
 
 # Verify 100% coverage is mandatory
-grep -rn "100%" .claude/skills/coverage/skill.md
-grep -rn "100%" .claude/skills/tdd/skill.md
+# Use the skillfile() resolver (defined in the automated script below) for case-safe lookup.
+# During a manual audit run these directly:
+grep -rn "100%" "$(find .claude/skills/coverage -maxdepth 1 -iname 'skill.md' | head -1)"
+grep -rn "100%" "$(find .claude/skills/tdd      -maxdepth 1 -iname 'skill.md' | head -1)"
 ```
 
 ### Step 5: Validate Against CLAUDE.md
 
 | CLAUDE.md Rule | Skill That Should Enforce | Verified |
 |----------------|---------------------------|----------|
-| Timezone Safety | timezone, review, tdd | |
-| Multi-tenancy | review | |
-| Financial Transactions | review, gateway-test | |
-| API Compatibility | review | |
-| Payment Idempotency | gateway-test, review | |
+| Timezone Safety | timezone, code-review, tdd | |
+| Multi-tenancy | code-review | |
+| Financial Transactions | code-review, gateway-test | |
+| API Compatibility | code-review | |
+| Payment Idempotency | gateway-test, code-review | |
 | Docker Commands | docker-exec (global) | |
 | No AI Mentions | commit, create-pr, fix-issue | |
+
+> **Overlap note**: `/rails-audit` covers a similar pre-release checklist (security, perf, DB, timezone). This skill audits the *skill files themselves*; `/rails-audit` audits *application code*. They are complementary, not duplicates — run `/rails-audit` on the codebase, `/qa-audit` on the skills directory.
 
 ### Step 6: Documentation Accuracy
 
@@ -154,7 +159,7 @@ bin/d rake -T coverage
 
 | Skill | Suggestion | Priority |
 |-------|------------|----------|
-| review | Add Honeybadger integration | Medium |
+| code-review | Add Honeybadger integration | Medium |
 | tdd | Add system test section | High |
 
 ### Actions Taken
@@ -183,11 +188,12 @@ fi
 echo "✓ No AI mentions"
 
 # Check 2: All commands use Docker
-# NOTE: canonical skill filename is lowercase `skill.md`. We skip whole "Before/After"
-# example blocks (awk drops lines from `<!-- Before` until the next `<!-- After` or blank
-# line) so intentional bad examples don't false-positive. `docker-exec` is the canonical
+# NOTE: canonical skill filename is UPPERCASE `SKILL.md` (~40 files; 0 lowercase).
+# skillfile() uses -iname for cross-platform portability (Linux CI), not to handle
+# mixed casing — mixed casing was fixed. We skip whole "Before/After" example blocks
+# (awk drops lines from `<!-- Before` until the next `<!-- After` or blank line) so
+# intentional bad examples don't false-positive. `docker-exec` is the canonical
 # "raw bundle exec inside the container" reference, so it's excluded by design.
-# Resolve a skill file case-insensitively (handles mixed SKILL.md / skill.md).
 skillfile() { find ".claude/skills/$1" -maxdepth 1 -iname "skill.md" | head -1; }
 
 echo "Checking Docker usage..."
@@ -262,19 +268,25 @@ echo "=== QA Audit Complete ==="
 User: /qa-audit
 
 Claude:
-## Skills QA Audit - 2025-01-21
+## Skills QA Audit - [run date]
 
 ### Scanning skills directory...
-Found 12 skills:
-- commit, coverage, create-pr, docker-exec, fix-issue
-- gateway-test, orchestrate, packwerk, qa-audit, review
-- tdd, timezone
+Found N skills (run `find .claude/skills -iname 'skill.md' | wc -l` for live count):
+- action-policy, adversarial-review, architect, audit-logs, code-review
+- code-smells, commit, coverage, create-pr, debug
+- docker-exec, factory-check, fix-issue, gateway-consistency, gateway-test
+- gem-hygiene, graphql, grill-me, kaizen, learning
+- memberships, migration, multi-tenancy, orchestrate, packwerk
+- pci-compliance, performance, qa-audit, query-analyzer, rails-audit
+- receiving-code-review, resilience, safe-script, security, sidekiq
+- skill-creator, spike-report, tdd, timezone, worktrees
+(list illustrative — run the find command for the current canonical set)
 
 ### Running automated checks...
 
 ✓ No AI mentions in commit messages
 ✓ Docker execution enforced
-✓ Package count accurate (10)
+✓ Package count accurate (run `ls -d packs/*/ | wc -l` for current count)
 ✓ 100% coverage required
 ✓ Forbidden patterns documented
 ✓ Time safety patterns correct
@@ -283,10 +295,10 @@ Found 12 skills:
 
 | Rule | Coverage | Status |
 |------|----------|--------|
-| Timezone Safety | timezone, review, tdd | OK |
-| Multi-tenancy | review | OK |
-| Financial Transactions | review, gateway-test | OK |
-| API Compatibility | review | OK |
+| Timezone Safety | timezone, code-review, tdd | OK |
+| Multi-tenancy | code-review | OK |
+| Financial Transactions | code-review, gateway-test | OK |
+| API Compatibility | code-review | OK |
 | Payment Idempotency | gateway-test | OK |
 | Docker Commands | docker-exec | OK |
 | No AI Mentions | commit, create-pr | OK |
@@ -296,7 +308,7 @@ Found 12 skills:
 No critical issues found. Skills are aligned with project requirements.
 
 Next suggested improvements:
-1. Add GraphQL-specific patterns to review skill
+1. Add GraphQL-specific patterns to code-review skill
 2. Consider adding Sidekiq job validation skill
 ```
 
@@ -321,72 +333,6 @@ Run QA audit:
 
 **You MUST**:
 1. Complete the current QA audit first
-2. Then append improvements to this skill file using Edit tool
-3. Format: `<!-- Kaizen: YYYY-MM-DD --> New content`
+2. Then invoke `/kaizen` to log improvements — do NOT self-edit this file inline
 
-**Recent Improvements**:
-<!-- Kaizen: 2026-05-25 - Audit run: package drift + skill ecosystem grown to 49 -->
-- Fixed: `packwerk/skill.md` package count 15 → **18** (added `billing`, `electronic_invoicing`, `partners`). This skill is the sanctioned source of truth; updated it.
-- Reported (NOT fixed — never modify CLAUDE.md): CLAUDE.md still says "Fifteen domain packages" and its table lists 15. User must update manually.
-- Fixed in THIS skill (the checks were themselves buggy):
-  - **Mixed filename casing is REAL**: 44 skills are `SKILL.md`, 5 are `skill.md` (grill-me, kaizen,
-    learning, skill-creator, spike-report). macOS FS is case-insensitive so a glob hides it, but
-    `find -name` / `grep --include` are case-SENSITIVE. The old checks used `--include="*.md"` then
-    later a lowercase literal — both undercounted. Now ALL file lookups use `find -iname 'skill.md'`
-    + a `skillfile()` resolver, so checks scan all 49 regardless of casing and stay portable to Linux CI.
-    (Earlier same-session note wrongly called lowercase "canonical" — it is NOT; uppercase is the majority
-    and the documented Claude Code convention.)
-  - **Dynamic package count**: replaced hardcoded "10 packages" with `ls -d packs/*/ | wc -l` vs the
-    number declared in packwerk's skill file. (Reality is now 18.)
-  - **Before/After false-positive**: awk now drops `<!-- Before -->` example blocks; `RAILS_ENV=production
-    … runner` is excluded (prod scripts legitimately aren't Docker-wrapped).
-- REAL finding fixed: `commit/SKILL.md` Step A/B showed raw `bundle exec pronto`/`rubocop` →
-  wrapped with `bin/d` (CLAUDE.local #3). The old grep missed this because `--include="skill.md"`
-  only matched the 5 lowercase files.
-- Verified clean (thorough, all 49 via `-iname`): no real `Co-Authored-By`/AI attribution
-  (only rule statements + the audit's own check descriptions); no unflagged `Time.now`;
-  coverage states 100% (9×); all skills have YAML frontmatter.
-- Noted (not violations): `.claude/skills` is **gitignored** (personal, not the shared repo);
-  10 `openspec-*` skills lack the Config Priority banner (external/experimental, not user-authored).
-  Ecosystem is 49 skills + `shared/`.
-- Session skills validated: `/grill-me` compliant (frontmatter, banner, scoped tools) but is one of
-  the 5 lowercase outliers — consider renaming to `SKILL.md` for convention consistency. Old
-  `[[reference_ai_coding_workflow_pocock]]` memory ref cleaned after consolidation into
-  `[[reference_ai_coding_multiagent_workflow]]`.
-
-<!-- Kaizen: 2026-01-24 - MCP Integration -->
-- Integrated: 7 new MCPs across 10 skills:
-  - `github` → fix-issue, create-pr, commit, code-review, debug (issues, PRs, reviews)
-  - `opensearch` → performance, debug, code-review (search query analysis)
-  - `rails` → performance, debug (console, routes, generators)
-  - `playwright` → tdd (system test debugging)
-  - `mermaid` → architect, code-review (diagram generation)
-  - `stripe` → gateway-test, pci-compliance (API validation)
-- Added: MCP usage documentation sections to integrated skills
-- Total MCPs available: 14 (clickhouse, context7, honeybadger, sentry, github, opensearch, rails, playwright, mermaid, stripe, filesystem, figma, terraform, kubernetes)
-
-<!-- Kaizen: 2026-01-24 - Shared Documentation -->
-- Created: `.claude/shared/` directory with 5 consolidated docs (factory-rules, forbidden-patterns, clickhouse-queries, testing-patterns, critical-rules)
-- Created: 3 new domain skills: `/pci-compliance`, `/gateway-consistency`, `/membership-validate`
-- Updated: 8 skills to reference shared documentation (tdd, coverage, multi-tenancy, timezone, sidekiq, packwerk, security, code-review)
-- Updated: `/orchestrate` with Phase 1A/1B split, PARALLEL domain skills, 3 new workflows
-- Updated: Skills count now 24 (was 21)
-- Fixed: `/code-review` missing shared references
-- Verified: All skills have proper YAML frontmatter and Config Priority banner
-- Verified: All `bundle exec` commands properly wrapped with `docker compose exec web`
-
-<!-- Kaizen: 2026-01-23 -->
-- Added: `⛔ Critical Rules` section to `commit/SKILL.md` - explicit user approval before git commit
-- Added: `⛔ Critical Rules` section to `create-pr/SKILL.md` - explicit user approval before git push/pr create
-- Added: `⛔ Critical Rules` section to `orchestrate/SKILL.md` - explicit user approval for Phase 4: Publish
-- Fixed: `docker-exec/SKILL.md` - clarified that raw `bundle exec` is ONLY for inside container
-- Updated: Skills count now 21 (was 20)
-- Added: New audit check for git operation approval requirements
-
-<!-- Kaizen: 2026-01-22 -->
-- Fixed: `create-pr/SKILL.md` lines 90-91 - wrapped pronto/rubocop with `docker compose exec web`
-- Fixed: `tdd/SKILL.md` line 276 - wrapped system test command with `docker compose exec`
-- Added: CRITICAL RULE - NEVER modify CLAUDE.md (shared versioned file)
-- Noted: CLAUDE.md lists 7 packages but reality is 10 (user must update manually)
-- Verified: 20 skills installed, all have Config Priority banner
-- Verified: All CLAUDE.md critical rules have skill coverage
+**Changelog**: see [`kaizen_log.md`](kaizen_log.md) (archived from inline; counts there reflect the session they were written and may be stale — always run `find .claude/skills -iname 'skill.md' | wc -l` for the live count).
