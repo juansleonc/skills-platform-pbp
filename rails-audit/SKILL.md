@@ -1,11 +1,11 @@
 ---
 name: rails-audit
-description: Use when running a full-application health check or pre-release audit across security, performance, code smells, resilience, database, testing, multi-tenancy, gem hygiene, and API compatibility.
-allowed-tools: [Bash, Read, Grep, Glob, Edit, mcp__clickhouse__run_select_query, mcp__clickhouse__list_tables, mcp__honeybadger__list_faults, mcp__honeybadger__get_fault]
+description: Use when running a full-application health check or pre-release audit across security, performance, code smells, resilience, database, testing, multi-tenancy, gem hygiene, API compatibility, and timezone safety.
+allowed-tools: [Bash, Read, Grep, Glob, Edit]
 disable-model-invocation: false
 ---
 
-> **📋 Config Priority**: `CLAUDE.local.md` overrides `CLAUDE.md` for local settings (Docker, linting, coverage). Always check both files for current project conventions.
+> **Config Priority**: `CLAUDE.local.md` overrides `CLAUDE.md` for local settings (Docker, linting, coverage). Always check both files for current project conventions.
 
 ## When to Use This Skill
 
@@ -19,7 +19,7 @@ Run this skill when:
 ## Usage Variants
 
 ```
-/rails-audit              # Full audit (all 9 categories)
+/rails-audit              # Full audit (all 10 categories)
 /rails-audit security     # Security only
 /rails-audit performance  # Performance only
 /rails-audit code-quality # Code smells + structural quality
@@ -28,17 +28,18 @@ Run this skill when:
 /rails-audit testing      # Test quality + factory patterns
 /rails-audit gems         # Gem hygiene + vulnerabilities
 /rails-audit api          # GraphQL backward compatibility
+/rails-audit timezone     # Time.now / Date.today usage
 ```
 
 # Rails Audit Orchestrator
 
-Comprehensive Rails application audit covering 9 categories, inspired by thoughtbot's rails-audit methodology and adapted for PBP's multi-tenant, multi-gateway architecture.
+Comprehensive Rails application audit covering 10 categories, inspired by thoughtbot's rails-audit methodology and adapted for PBP's multi-tenant, multi-gateway architecture.
 
 ## Audit Categories
 
 | # | Category | Skill | Focus |
 |---|----------|-------|-------|
-| 1 | **Security** | `/security` | OWASP, injection, IDOR, credentials, PCI |
+| 1 | **Security** | `/security` | OWASP, injection, IDOR, credentials |
 | 2 | **Performance** | `/performance` | N+1, indexes, memory, Ruby vs SQL |
 | 3 | **Code Smells** | `/code-smells` | Fat models/controllers, design patterns |
 | 4 | **Resilience** | `/resilience` | Timeouts, error handling, silent failures |
@@ -47,15 +48,16 @@ Comprehensive Rails application audit covering 9 categories, inspired by thought
 | 7 | **Multi-tenancy** | `/multi-tenancy` | Facility scoping, data isolation |
 | 8 | **Gem Hygiene** | `/gem-hygiene` | Vulnerabilities, unused, outdated |
 | 9 | **API Compatibility** | `/graphql` | Backward compatibility, mobile safety |
+| 10 | **Timezone Safety** | `/timezone` | Time.now / Date.today / DateTime.now |
 
 ## Execution Strategy
 
 ### Phase 1: Fast Automated Checks (Parallel)
 
-These checks run via grep/bash and complete quickly:
+These checks run via grep/bash and complete quickly. All commands run in Docker via `bin/d`.
 
 ```bash
-# === SECURITY ===
+# === 1. SECURITY ===
 echo "=== 1. SECURITY ==="
 
 # SQL Injection
@@ -78,7 +80,7 @@ grep -rn "api_key\|secret_key" app/ --include="*.rb" | grep -v "ENV\|credentials
 echo "Mass assignment (permit!):"
 grep -rn "permit!" app/controllers/ --include="*.rb" | wc -l
 
-# === PERFORMANCE ===
+# === 2. PERFORMANCE ===
 echo ""
 echo "=== 2. PERFORMANCE ==="
 
@@ -92,7 +94,7 @@ grep -rn '\.where(.*).present?' app/ --include="*.rb" | wc -l
 echo ".length instead of .count:"
 grep -rn '\.\w\+s\.length' app/ --include="*.rb" | grep -v "string\|to_s\|to_a\|spec" | wc -l
 
-# === CODE SMELLS ===
+# === 3. CODE SMELLS ===
 echo ""
 echo "=== 3. CODE SMELLS ==="
 
@@ -105,7 +107,7 @@ find app/controllers -name "*.rb" -exec wc -l {} + 2>/dev/null | sort -rn | awk 
 echo "Queries in views:"
 grep -rn '\.where\|\.find\|\.find_by' app/views/ --include="*.erb" 2>/dev/null | wc -l
 
-# === RESILIENCE ===
+# === 4. RESILIENCE ===
 echo ""
 echo "=== 4. RESILIENCE ==="
 
@@ -121,23 +123,38 @@ grep -rn 'rescue Exception' app/ --include="*.rb" | wc -l
 echo "Silent rescue nil:"
 grep -rn 'rescue.*nil$' app/ --include="*.rb" | wc -l
 
-# === DATABASE ===
+# === 5. DATABASE ===
 echo ""
 echo "=== 5. DATABASE ==="
 
 echo "Model references in migrations:"
 grep -rn 'User\.\|Facility\.\|Membership\.' db/migrate/ --include="*.rb" | grep -v "#\|class\|def\|end" | wc -l
 
-# === MULTI-TENANCY ===
+# === 6. TESTING ===
 echo ""
-echo "=== 6. MULTI-TENANCY ==="
+echo "=== 6. TESTING ==="
+# No fast grep phase — invoke /tdd + /factory-check in Phase 2 (Step 6).
+
+# === 7. MULTI-TENANCY ===
+echo ""
+echo "=== 7. MULTI-TENANCY ==="
 
 echo "Unscoped queries in controllers:"
 grep -rn '\.where\|\.find_by\|\.find(' app/controllers/ --include="*.rb" | grep -v "facility\|current_user\|current_facility" | wc -l
 
-# === TIMEZONE ===
+# === 8. GEM HYGIENE ===
 echo ""
-echo "=== 7. TIMEZONE ==="
+echo "=== 8. GEM HYGIENE ==="
+# No fast grep phase — invoke /gem-hygiene in Phase 2 (Step 8).
+
+# === 9. API COMPATIBILITY ===
+echo ""
+echo "=== 9. API COMPATIBILITY ==="
+# No fast grep phase — invoke /graphql in Phase 2 (Step 9).
+
+# === 10. TIMEZONE SAFETY ===
+echo ""
+echo "=== 10. TIMEZONE SAFETY ==="
 
 echo "Time.now usage:"
 grep -rn 'Time\.now\|Date\.today\|DateTime\.now' app/ --include="*.rb" | wc -l
@@ -152,10 +169,12 @@ For each category with findings from Phase 1, run the corresponding skill for de
 3. If code smells > thresholds → Run `/code-smells` detailed audit
 4. If resilience findings > 0 → Run `/resilience` detailed audit
 5. If database findings > 0 → Run `/migration` detailed audit
-6. Run `/factory-check` on recently changed specs
+6. Run `/tdd` + `/factory-check` on recently changed specs
 7. If multi-tenancy findings > 0 → Run `/multi-tenancy` detailed audit
 8. Run `/gem-hygiene` for dependency health
 9. If GraphQL changed → Run `/graphql` compatibility check
+10. If timezone findings > 0 → Run `/timezone` detailed audit
+11. **If any payment/gateway code is in scope → Run `/pci-compliance`** (do not rely on `/security` alone; `/pci-compliance` covers PCI DSS requirements that `/security` does not check)
 
 ### Phase 3: Report Generation
 
@@ -181,6 +200,7 @@ For each category with findings from Phase 1, run the corresponding skill for de
 | Multi-tenancy | 🟢/🟡/🔴 | X | Y |
 | Gem Hygiene | 🟢/🟡/🔴 | X | Y |
 | API Compat | 🟢/🟡/🔴 | X | Y |
+| Timezone Safety | 🟢/🟡/🔴 | X | Y |
 
 **Overall Health**: 🟢 Good / 🟡 Needs Attention / 🔴 Action Required
 
@@ -224,7 +244,7 @@ For each category with findings from Phase 1, run the corresponding skill for de
 When called with a specific category argument:
 
 ### `/rails-audit security`
-Run only Phase 1 security checks + full `/security` skill audit.
+Run only Phase 1 security checks + full `/security` skill audit. If payment code is involved, also run `/pci-compliance`.
 
 ### `/rails-audit performance`
 Run only Phase 1 performance checks + full `/performance` skill audit.
@@ -247,12 +267,26 @@ Run full `/gem-hygiene` skill audit.
 ### `/rails-audit api`
 Run full `/graphql` skill audit on GraphQL changes.
 
+### `/rails-audit timezone`
+Run only Phase 1 timezone checks + full `/timezone` skill audit.
+
+---
+
+## Linting After Findings
+
+If this audit surfaces code changes, run Pronto before committing (modified files only):
+
+```bash
+bin/d bundle exec pronto run -r rubocop -c develop -f text
+```
+
 ---
 
 ## Related Skills
 
 This skill orchestrates:
-- **`/security`** — OWASP, Brakeman, PCI compliance
+- **`/security`** — OWASP, Brakeman, injection, IDOR
+- **`/pci-compliance`** — PCI DSS requirements for payment code (dispatched separately from `/security`)
 - **`/performance`** — N+1, indexes, memory, Ruby vs SQL
 - **`/code-smells`** — Structural quality, design patterns
 - **`/resilience`** — Error handling, timeouts, external services
@@ -261,24 +295,12 @@ This skill orchestrates:
 - **`/multi-tenancy`** — Facility scoping, data isolation
 - **`/gem-hygiene`** — Dependency health
 - **`/graphql`** — API compatibility
+- **`/timezone`** — Time.now / Date.today / DateTime.now safety
 
 **Integration**: `/orchestrate` can call `/rails-audit` as part of pre-release validation.
 
 ---
 
-## Kaizen: Continuous Improvement
+## Kaizen Log
 
-> "Every day we must improve" - 改善
-
-**While executing this skill**, if you discover:
-- A new audit category needed
-- A better automated check
-- Missing PBP-specific patterns
-
-**You MUST**:
-1. Complete the current audit first
-2. Then append improvements to this skill file using Edit tool
-3. Format: `<!-- Kaizen: YYYY-MM-DD --> New content`
-
-**Recent Improvements**:
-<!-- Kaizen entries will be added here -->
+Archived to [`kaizen_log.md`](kaizen_log.md) in this directory. To record a new improvement, append a row there — do not self-edit this file during an audit run.
