@@ -49,20 +49,20 @@ grep -rn "HTTParty\.\|Faraday\.\|Net::HTTP\.\|RestClient\.\|URI\.open\|open-uri"
 grep -rn "HTTParty\.\(get\|post\|put\|delete\|patch\)" app/ --include="*.rb" | grep -v "timeout\|Timeout"
 grep -rn "Faraday\.new\|Faraday\.\(get\|post\)" app/ --include="*.rb" | grep -v "timeout"
 ```
-**Expected**: 0 matches (all HTTP calls must set explicit timeouts)
+**Expected**: 0 NEW occurrences in changed lines. Legacy baseline (2026-06-10): 17 HTTParty matches, 21 Faraday matches — pre-existing, do not introduce more.
 
 ```bash
 # 3. Silent error swallowing - HIGH RISK
 grep -rn "rescue.*nil$\|rescue.*; end\|rescue.*=> e$" app/ --include="*.rb" -A1 | grep -v "log\|raise\|notify\|Honeybadger\|ErrorService"
 ```
-**Expected**: 0 matches (rescued exceptions must be logged or notified)
+**Expected**: 0 NEW occurrences in changed lines. Legacy baseline (2026-06-10): ~1060 pipeline-output lines (multi-file, noisy grep) — do not introduce new silent rescues.
 
 ```bash
 # 4. Bare rescue / rescue Exception - MEDIUM RISK
 grep -rn "rescue\s*$" app/ --include="*.rb"
 grep -rn "rescue Exception" app/ --include="*.rb" | grep -v "# rubocop"
 ```
-**Expected**: 0 matches (always rescue specific exception classes)
+**Expected**: 0 NEW occurrences in changed lines. Legacy baseline (2026-06-10): 19 bare-rescue matches, 0 `rescue Exception` matches.
 
 ```bash
 # 5. .save without bang or return value check - MEDIUM RISK
@@ -208,7 +208,7 @@ class SyncContactsJob < ApplicationJob
     Rails.logger.error("Sync timeout for facility #{facility_id}: #{e.message}")
     raise  # Let Sidekiq retry
   rescue StandardError => e
-    ErrorService.new(e, facility_id: facility_id).notify
+    ErrorService.new(e, context: { facility_id: facility_id }).notify
     raise  # Let Sidekiq retry
   end
 end
@@ -219,12 +219,12 @@ end
 | Service | Location | Risk Level |
 |---------|----------|------------|
 | 14 Payment Gateways | `app/services/payment_service/` | CRITICAL |
-| Patch API (contacts) | `app/adapters/patch/` | HIGH |
+| Patch API (contacts) | `app/adapters/patch_adapter/` | HIGH |
 | Playsight cameras | `packs/camera_integrations/` | MEDIUM |
 | Webhook deliveries | `packs/webhooks/` | HIGH |
 | Email delivery | `app/mailers/` | MEDIUM |
-| SMS notifications | `app/services/sms/` | MEDIUM |
-| OpenSearch indexing | `app/models/concerns/searchable.rb` | MEDIUM |
+| SMS consent/opt-in | `app/services/sms_consent_phone_change_invalidator.rb`, `app/graphql/features/sms/` | MEDIUM |
+| OpenSearch indexing | `app/models/concerns/*_searchable.rb` (e.g. `user_searchable.rb`, `facility_searchable.rb`) | MEDIUM |
 
 ```bash
 # Audit all adapters for resilience
@@ -309,15 +309,4 @@ This skill works with:
 
 > "Every day we must improve" - 改善
 
-**While executing this skill**, if you discover:
-- A new resilience pattern specific to PBP
-- A missing external service in the audit list
-- A better detection heuristic
-
-**You MUST**:
-1. Complete the current resilience audit first
-2. Then append improvements to this skill file using Edit tool
-3. Format: `<!-- Kaizen: YYYY-MM-DD --> New content`
-
-**Recent Improvements**:
-<!-- Kaizen entries will be added here -->
+**While executing this skill**, if you discover a new pattern or heuristic, append it to [`kaizen_log.md`](kaizen_log.md) (sibling file). Promote durable rules into the active SKILL.md body. Log history is in that file — not inline here.
