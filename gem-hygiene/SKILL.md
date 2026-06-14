@@ -191,19 +191,6 @@ This skill works with:
 
 ---
 
-## Kaizen: Continuous Improvement
+## Continuous Improvement
 
-> "Every day we must improve" - 改善
-
-**While executing this skill**, if you discover:
-- A new duplicate functionality category
-- A better unused gem detection pattern
-- Common false positives to document
-
-**You MUST**:
-1. Complete the current gem audit first
-2. Then append improvements to this skill file using Edit tool
-3. Format: `<!-- Kaizen: YYYY-MM-DD --> New content`
-
-**Recent Improvements**:
-<!-- Kaizen entries will be added here -->
+If you discover a better pattern, a new duplicate-functionality category, or common false positives while running this skill, **do not self-edit this file mid-run**. Instead, note the improvement and run `/kaizen` separately after the audit completes. Historical improvement entries are in [`kaizen_log.md`](kaizen_log.md).
