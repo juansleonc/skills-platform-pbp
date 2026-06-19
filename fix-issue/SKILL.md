@@ -1,7 +1,7 @@
 ---
 name: fix-issue
 description: Analyze GitHub issues and implement solutions with tests
-allowed-tools: [Bash, Read, Write, Edit, Grep, Glob, mcp__github__*, mcp__honeybadger__list_faults, mcp__honeybadger__get_fault, mcp__sentry__find_projects, mcp__sentry__search_issues, mcp__sentry__search_issue_events, mcp__sentry__get_sentry_resource]
+allowed-tools: [Bash, Read, Write, Edit, Grep, Glob, mcp__github__*, mcp__honeybadger__list_faults, mcp__honeybadger__get_fault, mcp__sentry__sentry_list_projects, mcp__sentry__sentry_list_issues, mcp__sentry__sentry_get_issue, mcp__sentry__sentry_get_issue_events]
 disable-model-invocation: true
 ---
 
@@ -32,15 +32,15 @@ Analyze a GitHub issue, implement the solution, and create tests.
    mcp__honeybadger__get_fault: project_id, fault_id
    ```
 
-   **Sentry:**
+   **Sentry** (custom self-hosted MCP — `~/.claude/mcp-servers/sentry_selfhosted.py`):
    ```
-   mcp__sentry__search_issues:
+   mcp__sentry__sentry_list_issues:
      org_slug: "sentry"
      project_slug: "platform"  # or graphql_pro, pbp-mobile, etc.
      query: "is:unresolved <search_term>"
 
-   mcp__sentry__get_sentry_resource:
-     issue_id: "<issue_id>"
+   mcp__sentry__sentry_get_issue:
+     issue_id: "<numeric_issue_id>"
    ```
 
    **Choose based on issue type:**
@@ -63,9 +63,8 @@ Analyze a GitHub issue, implement the solution, and create tests.
    - Tests to add
    - Potential side effects
 
-6. **Implement fix**
-   - Write tests first (TDD)
-   - Implement minimal fix
+6. **Implement fix** — invoke `/tdd` FIRST (RED → GREEN → REFACTOR; CLAUDE.local.md rule #1/#8)
+   - Write failing test first, verify it fails, then implement minimal fix
    - Run tests
 
 7. **Validate** (all commands in Docker web container)
@@ -86,7 +85,9 @@ Analyze a GitHub issue, implement the solution, and create tests.
    # Must show 100% coverage on the changed file
    ```
 
-9. **Create commit** (with user approval)
+   Then invoke `/adversarial-review` (or `/code-review`) — GATE: must pass before committing (CLAUDE.local.md Auto-Invoke Table, "Después de implementar" row).
+
+9. **Create commit** (with user approval) — invoke `/commit` for the commit step
 
 ## Issue Analysis Template
 
