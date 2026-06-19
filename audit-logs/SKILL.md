@@ -134,13 +134,16 @@ The real file format uses a **class-name handler** (not a snake_case string) and
 optional `expected_target_type`. Copy the structure below (taken verbatim from the file):
 
 ```yaml
-# Real entry from packs/audit_logs/config/event_actions.yml:
-payment_method_added:
-  description: "Adding a new Credit Card"
-  category: player_profile
-  display_value_handler: PaymentMethodHandler
-  expected_target_type: Payment
+# Real structure from packs/audit_logs/config/event_actions.yml (note top-level `events:` wrapper):
+events:
+  payment_method_added:
+    description: "Adding a new Credit Card"
+    category: player_profile
+    display_value_handler: PaymentMethodHandler
+    expected_target_type: Payment
 ```
+
+All events live under a single top-level `events:` key; `EventConfiguration` reads `yaml_data["events"]` (event_configuration.rb:61).
 
 Key differences from older incorrect examples:
 - `display_value_handler` is a **CamelCase class name** (`PaymentMethodHandler`), not a snake_case string.
@@ -148,8 +151,10 @@ Key differences from older incorrect examples:
 - `category` has no quotes in the real file; use one of: `player_profile`, `reservation_pricing`,
   `membership_plan`, `calendar_actions`.
 
-Without this entry, `EventTracker` will reject the event. Also create the corresponding
-display value handler in `packs/audit_logs/app/services/display_value_generators/`.
+Without this entry, `EventConfiguration` raises `ArgumentError` ("Invalid event_type") and the `Event`
+model fails `event_description_matches_configuration` validation — the event will not be persisted.
+Also create the corresponding display value handler in
+`packs/audit_logs/app/services/display_value_generators/`.
 
 ### Step 3: Validate metadata (Critical)
 
