@@ -343,3 +343,22 @@ Time saved: ~2-5 minutes per spec file, more consistent patterns
 - Why: Rule #9 (100% Coverage) is directly relevant to this skill
 - Impact: Users can now reference the project-wide critical rules including coverage requirements
 - Completes: Full shared documentation integration (factory-rules, forbidden-patterns, testing-patterns, critical-rules, code-simplifier-integration all referenced)
+
+<!-- Kaizen: 2026-06-15 - Fix stale Redis.current snippet -->
+**Problem**: `Redis Tests` section recommended `before { Redis.current.flushdb }` as the primary
+pattern. `Redis.current` was removed in redis-rb 5.0. The project pins `redis = 5.4.1`
+(Gemfile + Gemfile.lock) and has zero occurrences of `Redis.current` anywhere in app/, lib/,
+or spec/. The snippet would raise `NoMethodError` at runtime.
+
+**Evidence**: 17+ spec files in the codebase all use `before { Rails.cache.clear }` exclusively.
+Initializers use `Redis.new(...)` (named constants), never the removed global.
+
+**Fix**: Removed the broken `Redis.current.flushdb` line and the `# Or:` fallback comment.
+`Rails.cache.clear` is now the sole recommended pattern, matching 100% of existing test usage.
+
+**Scope**: SKILL.md lines 217-219 only. No behavior change to any rake task or validator.
+
+**Deferred**: Whether to also document explicit raw-Redis flushes (e.g., flushing a named
+client like `GRAPHQL_SUBSCRIPTIONS_REDIS.flushdb`) was left to user decision — there is no
+current test that does this, and `Rails.cache.clear` covers all observed rate-limiting/caching
+use cases.

@@ -30,113 +30,6 @@ Codecov runs **TWO separate checks** on every PR:
 > **Common Failure**: PR passes `codecov/patch` but fails `codecov/project` because adding new code
 > without proportional tests reduces the global coverage percentage, even if new lines are covered.
 
-## Project Coverage Workflow (When codecov/project Fails)
-
-**Why `codecov/project` fails**: Adding ANY new lines of code without adding MORE test lines reduces
-the overall coverage percentage. Even with 100% patch coverage, the global % drops.
-
-### Understanding the Math
-
-```
-Before PR:  80,000 covered lines / 100,000 total lines = 80.00% coverage
-After PR:   80,100 covered lines / 100,200 total lines = 79.92% coverage (FAIL: -0.08%)
-```
-
-Even though you covered all 100 new lines (100% patch), you only added 100 test hits.
-The project now has 200 more lines but only 100 more covered hits → percentage drops.
-
-### Step 1: Check Current Project Coverage Impact
-
-```bash
-# Get the coverage delta your PR will cause
-bin/d rspec  # set SIMPLECOV_REPORT=true for coverage output
-```
-
-To compare against the develop baseline **without leaving your feature branch** (required — see
-CLAUDE.local.md rule #16: NEVER `git checkout develop` from a feature branch):
-
-```bash
-# Option A (preferred): isolated worktree — see /worktrees skill for the full pattern
-git worktree add --detach /tmp/cov-baseline origin/develop
-# Then in a separate shell or compose one-off run against that worktree:
-# docker compose -f docker-compose.yml run --rm --no-deps \
-#   -e SIMPLECOV_REPORT=true -e BUNDLE_PATH=/usr/local/bundle \
-#   -v /tmp/cov-baseline:/app web bundle exec rspec
-# Note the total coverage percentage, then clean up:
-git worktree remove /tmp/cov-baseline
-
-# Option B (simpler for most cases): skip the develop baseline comparison entirely.
-# Use patch-coverage on changed lines instead — it is Codecov's primary check:
-bin/d rake 'coverage:local:delta'
-```
-
-> **Rule #16 Safety**: NEVER run `git stash && git checkout develop && ...` to measure a baseline.
-> That mutates your working tree and risks pushing to a protected branch (TRI-74 incident class).
-> Use a worktree or rely on patch-coverage alone.
-
-### Step 2: Calculate Required Compensating Coverage
-
-To maintain or increase project coverage when adding N new lines:
-
-```
-Required additional covered lines = N × (1 / current_coverage_ratio)
-
-Example: Adding 200 new lines at 80% base coverage:
-Required = 200 × (1 / 0.80) = 250 covered lines needed
-You need 50 MORE test hits beyond just covering your new code
-```
-
-### Step 3: Find Low-Coverage Files to Improve
-
-```bash
-# Find files with lowest coverage (easy wins for compensating coverage)
-bin/d rake 'coverage:local:uncovered[20]'
-
-# Focus on files with:
-# - High line count but low coverage (more impact per test)
-# - Simple logic (quick to test)
-# - Related to your changes (natural to include in PR)
-```
-
-### Step 4: Add Compensating Tests
-
-**Strategy 1: Improve related files**
-If your PR touches `membership.rb`, also improve coverage on:
-- `membership_payment.rb`
-- `membership_plan.rb`
-- Related services in the same domain
-
-**Strategy 2: Low-hanging fruit**
-Target files with many uncovered lines but simple logic:
-```bash
-# Example: Find uncovered lines in a specific file
-bin/d rake 'coverage:local:file[app/models/user.rb]'
-```
-
-**Strategy 3: Add edge case tests**
-Look for uncovered branches in your modified files:
-- Error handling paths (`rescue` blocks)
-- Conditional branches (`elsif`, `else`)
-- Guard clauses (`return if`, `return unless`)
-
-### Step 5: Verify Project Coverage Impact
-
-```bash
-# Run full test suite with coverage
-bin/d rspec  # set SIMPLECOV_REPORT=true
-
-# Check the total coverage percentage
-# It should be >= develop branch baseline
-```
-
-### Project Coverage Checklist
-
-Before pushing PR:
-- [ ] `codecov/patch` will pass (all changed lines covered)
-- [ ] `codecov/project` will pass (global % not decreased)
-- [ ] If adding many new lines, added compensating tests
-- [ ] Verified with full `rspec` run, not just affected specs
-
 ## Patch Coverage Workflow (PRIORITY)
 
 **ALWAYS follow this workflow when working on PRs:**
@@ -168,6 +61,23 @@ bin/d rake 'coverage:local:file[app/models/membership.rb]'
 ### Step 5: Cross-Reference Uncovered Lines
 Compare the changed line numbers (Step 2) with uncovered lines from SimpleCov.
 **ALL changed lines must be covered before committing.**
+
+```bash
+# Read coverage/coverage.json for line-by-line data:
+# Lines with 0 = uncovered; lines with null = non-executable
+```
+
+**Verification Checklist:**
+- [ ] All added lines are covered (not showing 0 in SimpleCov)
+- [ ] All modified lines are covered
+- [ ] Edge cases and error paths are tested
+- [ ] No new code without corresponding tests
+
+**If changed lines are uncovered:**
+1. Identify the uncovered line numbers from SimpleCov
+2. Cross-reference with `git diff` output
+3. Write tests that execute those specific lines
+4. **DO NOT commit until ALL changed lines are covered**
 
 ## Available Rake Tasks
 
@@ -249,45 +159,6 @@ For improving overall coverage (not PR-specific):
    bin/d rake 'coverage:local:file[app/path/to/file.rb]'
    ```
 
-## Coverage Verification (MANDATORY)
-
-### For PRs/Feature Branches (PATCH Coverage)
-
-After writing tests, ALWAYS verify that ALL changed lines are covered:
-
-```bash
-# 1. Run tests with SimpleCov
-bin/d rspec spec/path_spec.rb  # set SIMPLECOV_REPORT=true
-
-# 2. Get changed line numbers
-git diff develop...HEAD --unified=0 -- app/models/membership.rb | grep "^@@"
-
-# 3. Check file coverage
-bin/d rake 'coverage:local:file[app/models/membership.rb]'
-
-# 4. Read coverage/coverage.json for detailed line-by-line data
-# Lines with 0 are uncovered, lines with null are non-executable
-```
-
-**Verification Checklist:**
-- [ ] All added lines are covered (not showing 0 in SimpleCov)
-- [ ] All modified lines are covered
-- [ ] Edge cases and error paths are tested
-- [ ] No new code without corresponding tests
-
-**If changed lines are uncovered:**
-1. Identify the uncovered line numbers from SimpleCov
-2. Cross-reference with `git diff` output
-3. Write tests that execute those specific lines
-4. **DO NOT commit until ALL changed lines are covered**
-
-### For Total File Coverage (Legacy)
-
-```bash
-# Check total coverage for a file
-bin/d rake 'coverage:local:file[app/models/user.rb]'
-```
-
 ## Forbidden Patterns
 
 > 📖 **See [Forbidden Patterns](../shared/forbidden-patterns.md) for complete list.**
@@ -344,8 +215,7 @@ expect(build(:user).expires_at).to eq(Time.now + 30.days)
 **Clear Redis for rate limiting/caching:**
 
 ```ruby
-before { Redis.current.flushdb }
-# Or: Rails.cache.clear
+before { Rails.cache.clear }
 ```
 
 ## Spec File Template
@@ -463,6 +333,115 @@ Claude:
 | Error handling paths | `rescue => e` blocks | Test error scenarios |
 | New method calls | `matching_payment = find_pending_payment_for_current_period` | Test the new method is called |
 | Class methods | `def self.create_membership_payment` | Use `Membership.create_membership_payment(...)` |
+
+---
+
+## Appendix: Project Coverage Workflow (When codecov/project Fails)
+
+**Why `codecov/project` fails**: Adding ANY new lines of code without adding MORE test lines reduces
+the overall coverage percentage. Even with 100% patch coverage, the global % drops.
+
+### Understanding the Math
+
+```
+Before PR:  80,000 covered lines / 100,000 total lines = 80.00% coverage
+After PR:   80,100 covered lines / 100,200 total lines = 79.92% coverage (FAIL: -0.08%)
+```
+
+Even though you covered all 100 new lines (100% patch), you only added 100 test hits.
+The project now has 200 more lines but only 100 more covered hits → percentage drops.
+
+### Step 1: Check Current Project Coverage Impact
+
+```bash
+# Get the coverage delta your PR will cause
+bin/d rspec  # set SIMPLECOV_REPORT=true for coverage output
+```
+
+To compare against the develop baseline **without leaving your feature branch** (required — see
+CLAUDE.local.md rule #16: NEVER `git checkout develop` from a feature branch):
+
+```bash
+# Option A (preferred): isolated worktree — see /worktrees skill for the full pattern
+git worktree add --detach /tmp/cov-baseline origin/develop
+# Then in a separate shell or compose one-off run against that worktree:
+# docker compose -f docker-compose.yml run --rm --no-deps \
+#   -e SIMPLECOV_REPORT=true -e BUNDLE_PATH=/usr/local/bundle \
+#   -v /tmp/cov-baseline:/app web bundle exec rspec
+# Note the total coverage percentage, then clean up:
+git worktree remove /tmp/cov-baseline
+
+# Option B (simpler for most cases): skip the develop baseline comparison entirely.
+# Use patch-coverage on changed lines instead — it is Codecov's primary check:
+bin/d rake 'coverage:local:delta'
+```
+
+> **Rule #16 Safety**: NEVER run `git stash && git checkout develop && ...` to measure a baseline.
+> That mutates your working tree and risks pushing to a protected branch (TRI-74 incident class).
+> Use a worktree or rely on patch-coverage alone.
+
+### Step 2: Calculate Required Compensating Coverage
+
+To maintain or increase project coverage when adding N new lines:
+
+```
+Required additional covered lines = N × (1 / current_coverage_ratio)
+
+Example: Adding 200 new lines at 80% base coverage:
+Required = 200 × (1 / 0.80) = 250 covered lines needed
+You need 50 MORE test hits beyond just covering your new code
+```
+
+### Step 3: Find Low-Coverage Files to Improve
+
+```bash
+# Find files with lowest coverage (easy wins for compensating coverage)
+bin/d rake 'coverage:local:uncovered[20]'
+
+# Focus on files with:
+# - High line count but low coverage (more impact per test)
+# - Simple logic (quick to test)
+# - Related to your changes (natural to include in PR)
+```
+
+### Step 4: Add Compensating Tests
+
+**Strategy 1: Improve related files**
+If your PR touches `membership.rb`, also improve coverage on:
+- `membership_payment.rb`
+- `membership_plan.rb`
+- Related services in the same domain
+
+**Strategy 2: Low-hanging fruit**
+Target files with many uncovered lines but simple logic:
+```bash
+# Example: Find uncovered lines in a specific file
+bin/d rake 'coverage:local:file[app/models/user.rb]'
+```
+
+**Strategy 3: Add edge case tests**
+Look for uncovered branches in your modified files:
+- Error handling paths (`rescue` blocks)
+- Conditional branches (`elsif`, `else`)
+- Guard clauses (`return if`, `return unless`)
+
+### Step 5: Verify Project Coverage Impact
+
+```bash
+# Run full test suite with coverage
+bin/d rspec  # set SIMPLECOV_REPORT=true
+
+# Check the total coverage percentage
+# It should be >= develop branch baseline
+```
+
+### Project Coverage Checklist
+
+Before pushing PR:
+- [ ] `codecov/patch` will pass (all changed lines covered)
+- [ ] `codecov/project` will pass (global % not decreased)
+- [ ] If adding many new lines, added compensating tests
+- [ ] Verified with full `rspec` run, not just affected specs
 
 ---
 
