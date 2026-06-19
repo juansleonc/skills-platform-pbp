@@ -249,7 +249,6 @@ Run ClickHouse queries (see above) to identify:
 
 ### Production Behavior
 - [ ] Success rate within expected range (>95%)
-- [ ] Processing time within expected range
 - [ ] Error codes are documented
 
 ## Report Format
@@ -275,11 +274,11 @@ Run ClickHouse queries (see above) to identify:
 
 ### Production Performance
 
-| Gateway | Success Rate | Avg Time | Status |
-|---------|--------------|----------|--------|
-| stripe | 98.5% | 850ms | ✅ |
-| card_connect | 97.2% | 1200ms | ✅ |
-| razor_pay | 94.1% | 2100ms | ⚠️ |
+| Gateway | Success Rate | Status |
+|---------|--------------|--------|
+| stripe | 98.5% | ✅ |
+| card_connect | 97.2% | ✅ |
+| razor_pay | 94.1% | ⚠️ |
 
 ### Recommendations
 1. Implement void service for razor_pay
@@ -347,6 +346,7 @@ Claude:
 
 | Date | Change |
 |------|--------|
+| 2026-06-15 | Removed orphan latency refs that ClickHouse can't back: dropped "Avg Time" column from the Production Performance report template + "Processing time within expected range" checklist item (latency lives in New Relic APM, not the `payments` table — consistent with the L178 note) |
 | 2026-06-14 | Fixed dead shared-doc link (`../../` → `../../../docs/domains/payments.md`); fixed webhook check dir (billing pack, not app/controllers/webhooks/); added `/pci-compliance` disambiguator; archived Kaizen log to sibling |
 | 2026-06-10 | Fixed ClickHouse SQL (removed processing_time_ms, added FINAL, fixed run_query tool name) |
 | 2026-06-10 | Fixed audit-loop paths (`payment_service/${gw}/` → `payment_service/gateway/${gw}/`), regenerated gateway list |
