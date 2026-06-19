@@ -1,6 +1,6 @@
 ---
 name: tdd
-description: MANDATORY for all code changes — triggers when implementing features, fixing bugs, modifying existing behavior, adding guards, or changing any code that requires behavioral verification.
+description: MANDATORY for behavioral code changes — triggers when implementing a feature, fixing a bug, modifying existing behavior, or adding a guard. Does NOT fire on pure reads, docs, or config-only changes.
 allowed-tools: [Bash, Read, Write, Edit, Grep, Glob, Agent, mcp__context7__resolve-library-id, mcp__context7__query-docs]
 disable-model-invocation: false
 ---
@@ -131,6 +131,7 @@ Thinking about skipping the RED step? Match your thought against this table firs
 | "TDD will slow me down" | TDD faster than debugging. Pragmatic = test-first. |
 | "Manual test faster" | Manual doesn't prove edge cases. You'll re-test every change. |
 | "Existing code has no tests" | You're improving it. Add tests for existing code. |
+| "It's frontend/JS — there's no unit-test framework" | **Not exempt.** A frontend behavioral change still needs RED. Escalate to a Playwright **system test** (`system_specs/`) as the RED, or write the failing test at the **nearest testable boundary** (the serializer / JSON data-contract the change depends on). "No unit harness" ≠ license to skip RED. |
 
 **Red Flags — STOP and Start Over:**
 - Code before test
@@ -241,7 +242,7 @@ RED is not proven if the test is flaky. Quick decision tree:
 
 - Passes 10x locally but fails in parallel? → `before(:each)` not `before(:all)`, `SecureRandom` uniqueness
 - Time-of-day failures? → `Timecop.freeze(Time.current)`
-- Redis state leaking? → `Redis.current.flushdb` in `before` — see [../shared/testing-patterns.md](../shared/testing-patterns.md)
+- Redis state leaking? → `Rails.cache.clear` in `before` (rate-limit counters: `RackAttackRedis.connection.clear`) — `Redis.current` is dead in redis-rb 5.x; see [../shared/testing-patterns.md](../shared/testing-patterns.md)
 - Order-dependent failures?
 
 ```bash
@@ -271,6 +272,10 @@ docker compose exec -e RAILS_ENV=test -e FPROF=1 web bundle exec rspec <spec>
 # Note: bin/d does not forward env vars; use docker compose exec directly
 ```
 
+### Parallel-safety (isolation)
+
+New/changed specs MUST be parallel-safe. CI runs `parallel_rspec --group-by runtime` and rebalancing co-locates files in shared processes — a leaked global will fail an UNRELATED spec in the same worker. Concretely: use block-form `Timecop.freeze do…end` (not bare `Timecop.freeze`), NO `before(:all) { create(...) }` (records leak across files), reset any `Time.zone=` / `Current.*` you set in an `after`, prefer transactional fixtures. See [Testing Patterns](../shared/testing-patterns.md).
+
 ### Characterization Tests for Untested Legacy
 
 When the delete-and-reimplement protocol is too risky (payment/state-machine code with >~200 lines and no tests), write tests that CAPTURE current behavior first (not asserting it's correct), then refactor green, then correct. Trigger `/code-smells` before attempting a large legacy refactor.
@@ -288,6 +293,8 @@ Unit (`spec/models/`, `spec/services/`), Integration (`spec/requests/`, `spec/gr
 System tests live in `system_specs/` (NOT `spec/`). Full guide: [../shared/system-test-guide.md](../shared/system-test-guide.md).
 
 Quick summary: version-match gem vs CLI (`grep capybara-playwright-driver Gemfile.lock`), run via `bin/test_system`, use `SecureRandom.hex(4)` in emails, prefer Capybara's built-in `wait:` over `sleep`, auto-screenshots on failure in `tmp/screenshots/playwright/`.
+
+For a behavioral change in a frontend component that has no JS unit harness, the Playwright system test IS the RED step — write it first, before touching the component.
 
 ## Remember
 

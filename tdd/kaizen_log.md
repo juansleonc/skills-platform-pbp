@@ -52,3 +52,11 @@ Archived from SKILL.md inline log. Entries are verbatim and in chronological ord
 - Added B5 (Flaky-Test Triage / B4 addendum): test-prof factory-prof pointer with spike-validated `FPROF=1` form (embedded in B4 section, not standalone).
 - Added B6: Mutation testing note-only (mutant/mutest absent from Gemfile; out of scope; NOT mandatory).
 - Coverage step: replaced duplicated rake walkthrough with pointer to /coverage skill (load-bearing claim-vs-evidence table and contract reconciliation retained inline).
+
+<!-- Kaizen: 2026-06-15 — Fix dead Redis.current.flushdb tip (caught by skills re-validation) -->
+- Flaky-test triage tip (SKILL.md:245) recommended `Redis.current.flushdb` in `before`. `Redis.current`
+  was removed in redis-rb 5.x (this repo runs 5.4.1, uses it nowhere) → raises NoMethodError.
+- Replaced with `Rails.cache.clear` (rate-limit counters: `RackAttackRedis.connection.clear`), matching
+  the canonical Pattern 7 reset in shared/testing-patterns.md the tip already points to.
+- Same dead-API class fixed in coverage + sidekiq earlier; tdd was the last live offender in any skill body.
+- Source: skills-audit Step-0 re-validation pass (coverage validator surfaced it as out-of-scope-for-coverage).
