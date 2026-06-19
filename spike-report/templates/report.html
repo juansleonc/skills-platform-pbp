@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SPIKE: {spike_name}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .nav-tab.active { background: #3B82F6; color: white; }
+    .diagram-container {
+      background: #f9fafb;
+      padding: 20px;
+      border-radius: 12px;
+      overflow-x: auto;
+    }
+    .node { cursor: pointer; transition: all 0.2s; }
+    .node:hover { filter: brightness(1.1); }
+  </style>
+</head>
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen">
+  <div class="max-w-7xl mx-auto p-4 md:p-8">
+
+    <!-- Header -->
+    <header class="text-center mb-8">
+      <h1 class="text-4xl font-bold text-gray-800 mb-2">
+        {emoji} SPIKE: {spike_name}
+      </h1>
+      <p class="text-xl text-gray-600">{subtitle}</p>
+      <div class="mt-4 inline-flex items-center gap-2 bg-{status_color}-100 text-{status_color}-800 px-4 py-2 rounded-full">
+        <span class="font-semibold">{status_badge}</span>
+      </div>
+    </header>
+
+    <!-- Tab Navigation -->
+    <nav class="flex flex-wrap gap-2 mb-8 justify-center">
+      {for each section}
+      <button class="nav-tab {active_class} px-4 py-2 rounded-lg font-semibold bg-gray-200 hover:bg-gray-300 transition"
+              onclick="showTab('{section_id}')">
+        {section_icon} {section_title}
+      </button>
+      {end}
+    </nav>
+
+    <!-- Tab Contents -->
+    {for each section}
+    <div id="{section_id}" class="tab-content {active_class}">
+      <div class="bg-white rounded-xl shadow-lg p-6 mb-8">
+        <h2 class="text-2xl font-bold text-gray-800 mb-6">
+          {section_icon} {section_title}
+        </h2>
+
+        <!-- Diagram Container -->
+        <div class="diagram-container">
+          <svg viewBox="0 0 {width} {height}" class="w-full max-w-4xl mx-auto">
+            {svg_content}
+          </svg>
+        </div>
+
+        <!-- Info Boxes -->
+        {if has_warnings}
+        <div class="mt-6 p-4 bg-yellow-50 border border-yellow-300 rounded-lg">
+          <h4 class="font-bold text-yellow-800 mb-2">💡 {warning_title}</h4>
+          <p class="text-yellow-700">{warning_text}</p>
+        </div>
+        {end}
+
+        {if has_gaps}
+        <div class="mt-6 p-4 bg-red-50 border border-red-300 rounded-lg">
+          <h4 class="font-bold text-red-800 mb-2">🔍 {gap_title}</h4>
+          <ul class="list-disc list-inside text-red-700">
+            {for each gap}
+            <li>{gap_description}</li>
+            {end}
+          </ul>
+        </div>
+        {end}
+
+        {if has_new_features}
+        <div class="mt-6 p-4 bg-blue-50 border border-blue-300 rounded-lg">
+          <h4 class="font-bold text-blue-800 mb-2">✨ {feature_title}</h4>
+          <ul class="list-disc list-inside text-blue-700">
+            {for each feature}
+            <li>{feature_description}</li>
+            {end}
+          </ul>
+        </div>
+        {end}
+      </div>
+    </div>
+    {end}
+
+    <!-- Footer: Related Documents & Next Steps -->
+    <div class="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl shadow-lg p-6 text-white mt-8">
+      <h2 class="text-2xl font-bold mb-4">📌 Next Steps</h2>
+      <div class="grid md:grid-cols-2 gap-6">
+        <div>
+          <h3 class="font-bold mb-2">📄 Related Documents:</h3>
+          <ul class="text-blue-100 space-y-1">
+            {for each doc}
+            <li>• {doc_path}</li>
+            {end}
+          </ul>
+        </div>
+        <div>
+          <h3 class="font-bold mb-2">🎯 Action Items:</h3>
+          <ol class="list-decimal list-inside text-blue-100 space-y-1">
+            {for each action}
+            <li>{action_description}</li>
+            {end}
+          </ol>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- JavaScript -->
+  <script>
+    function showTab(tabId) {
+      document.querySelectorAll('.tab-content').forEach(tab =>
+        tab.classList.remove('active')
+      );
+      document.querySelectorAll('.nav-tab').forEach(btn =>
+        btn.classList.remove('active')
+      );
+      document.getElementById(tabId).classList.add('active');
+      event.target.classList.add('active');
+    }
+  </script>
+</body>
+</html>
