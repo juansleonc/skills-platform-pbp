@@ -1,170 +1,23 @@
 ---
 name: architect
 description: Use when designing a new feature, pack, service, schema, or integration before implementation begins.
-allowed-tools: [Bash, Read, Grep, Glob, Agent, mcp__context7__resolve-library-id, mcp__context7__query-docs, mcp__clickhouse__run_query, mcp__clickhouse__list_tables, mcp__clickhouse__list_databases]
+allowed-tools: [Bash, Read, Grep, Glob, Agent, mcp__context7__resolve-library-id, mcp__context7__query-docs, mcp__clickhouse__run_query, mcp__clickhouse__list_tables, mcp__clickhouse__list_databases, mcp__honeybadger__list_faults, mcp__honeybadger__get_fault, mcp__opensearch__SearchIndexTool]
 disable-model-invocation: false
 ---
 
-> **📋 Config Priority**: `CLAUDE.local.md` overrides `CLAUDE.md` for local settings (Docker, linting, coverage). Always check both files for current project conventions.
-
-## Shared References
-
-> **📚 This skill uses shared documentation. See:**
-> - Use `Grep` and `Glob` for structural exploration before designing changes (Serena removed 2026-06-02)
-
 # Software Architect Skill
 
-Strategic design decisions BEFORE any code is written. This skill bridges the gap between requirements and implementation.
+Strategic design decisions BEFORE any code is written — bridges requirements and implementation. "Measure twice, cut once": bad architecture is expensive to fix.
 
-## When to Use
-
-**ALWAYS run `/architect` before implementing:**
-- New features
-- Significant refactors
-- New integrations
-- Database schema changes
-- New packages/modules
-
-## Philosophy
-
-> "Measure twice, cut once"
-
-Bad architecture decisions are expensive to fix. This skill ensures:
-1. Code lives in the right place
-2. Patterns match existing codebase
-3. Scalability is considered upfront
-4. Production data informs design
+**Run `/architect` before implementing:** new features, significant refactors, new integrations, schema changes, new packages/modules. It ensures (1) code lives in the right place, (2) patterns match the existing codebase, (3) scalability is considered upfront, (4) production data informs design.
 
 ## OpenSpec Integration (Experimental)
 
-**FIRST DECISION: Should this use OpenSpec workflow?**
-
-Before starting architecture design, evaluate if this feature warrants OpenSpec's structured approach:
-
-### OpenSpec Scoring Algorithm
-
-```ruby
-score = 0
-
-# Positive criteria
-score += 3 if estimated_time > 1.day
-score += 2 if customer_facing?      # Emails, UI, public API
-score += 2 if multi_stakeholder?    # Needs PM/design approval
-score += 2 if compliance_required?  # PCI, SOC2, audit trail
-score += 1 if complex_decisions?    # Multiple architectural choices
-score += 1 if needs_handoff?        # Between sessions/developers
-
-# Negative criteria
-score -= 2 if bug_fix?
-score -= 2 if prototype?
-score -= 1 if internal_only?
-
-# Decision threshold
-if score >= 5
-  :use_openspec         # High-value: Use structured workflow
-elsif score >= 3
-  :ask_user            # Medium: Let user decide
-else
-  :use_architect       # Low: Traditional workflow sufficient
-end
-```
-
-### When Score ≥ 5: Recommend OpenSpec
-
-**Output to user**:
-```
-📋 OpenSpec Recommended (Score: X)
-
-This feature meets OpenSpec criteria:
-- [✓/✗] Large (> 1 day)
-- [✓/✗] Customer-facing
-- [✓/✗] Multi-stakeholder
-- [✓/✗] Compliance required
-- [✓/✗] Complex decisions
-- [✓/✗] Needs handoff
-
-Recommended workflow:
-1. /opsx:new [feature-name]
-2. /opsx:ff [feature-name]     # Generates: proposal, design, specs, tasks
-3. Review artifacts
-4. /opsx:apply                 # Implement
-
-Alternatively, continue with /architect for traditional planning.
-Your choice?
-```
-
-**If user chooses OpenSpec**:
-- Guide them through `/opsx:new` + `/opsx:ff`
-- Your role ends here (OpenSpec workflow takes over)
-- Remind: "Run `/opsx:apply` when ready to implement"
-
-**If user declines OpenSpec**:
-- Continue with normal Architecture Decision Process below
-- Document decision in output: "Proceeding with /architect (OpenSpec declined)"
-
-### When Score 3-4: Ask User
-
-```
-🤔 OpenSpec Optional (Score: X)
-
-This feature could benefit from OpenSpec but isn't required.
-
-OpenSpec pros:
-- Structured specs (testable scenarios)
-- Design decisions documented (design.md)
-- Clear implementation tasks (tasks.md)
-
-OpenSpec cons:
-- ~75 min overhead before coding
-- Less flexible mid-implementation
-
-Use OpenSpec? (y/n)
-```
-
-### When Score < 3: Skip OpenSpec
-
-Silently proceed with traditional `/architect` workflow. No need to mention OpenSpec.
-
-### Integration with OpenSpec Workflow
-
-**If OpenSpec change exists** (check `openspec/changes/[feature-name]/`):
-
-1. **Read existing artifacts**:
-   ```bash
-   ls openspec/changes/*/proposal.md 2>/dev/null
-   ls openspec/changes/*/design.md 2>/dev/null
-   ```
-
-2. **If proposal.md exists**:
-   - Read it to understand motivation
-   - Reference it in architecture recommendations
-   - Note: "OpenSpec proposal exists, building on top of it"
-
-3. **If design.md exists**:
-   - STOP: OpenSpec already did design
-   - Output: "Design.md already exists in OpenSpec change. Use `/opsx:continue` or `/opsx:apply` instead of /architect."
-
-4. **If neither exists**:
-   - Normal `/architect` workflow
-   - Suggest: "Consider creating OpenSpec change first with `/opsx:new`" (if score ≥ 3)
+**FIRST DECISION: Should this use the OpenSpec spec-driven workflow?** Heavy features defer to `/opsx:new` (→ `/opsx:ff` → `/opsx:apply`) instead of continuing here. Decision rule + ≥2-of scoring + workflow: see CLAUDE.local.md → "OpenSpec — Spec-Driven Development". If an OpenSpec change already has a `design.md`, stop and use `/opsx:continue` / `/opsx:apply` rather than `/architect`.
 
 ## Architecture Decision Process
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  1. UNDERSTAND: What problem are we solving?                    │
-│              ↓                                                  │
-│  2. EXPLORE: How does similar code work today?                  │
-│              ↓                                                  │
-│  3. ANALYZE: Check production data volumes (ClickHouse)         │
-│              ↓                                                  │
-│  4. RESEARCH: Best practices from Context7                      │
-│              ↓                                                  │
-│  5. DESIGN: Propose architecture with trade-offs                │
-│              ↓                                                  │
-│  6. VALIDATE: Ensure multi-tenancy, performance, security       │
-└─────────────────────────────────────────────────────────────────┘
-```
+Ordered flow: **1. UNDERSTAND** the problem → **2. EXPLORE** how similar code works today → **3. ANALYZE** production volumes (ClickHouse) → **4. RESEARCH** best practices (Context7) → **5. DESIGN** with trade-offs → **6. VALIDATE** multi-tenancy, performance, security.
 
 ## Step 0: Check Investigations Folder (BEFORE ANYTHING ELSE)
 
@@ -216,7 +69,7 @@ ls packs/
 grep -rn "class.*Mutation" app/graphql/mutations/ --include="*.rb"
 ```
 
-> Use `Grep` and `Glob` for symbol-level discovery. (Serena removed 2026-06-02.)
+> Use `Grep` and `Glob` for symbol-level discovery.
 
 **Use Agent for deep exploration:**
 
@@ -232,22 +85,11 @@ Agent tool:
 
 ## Step 3: Analyze Production Data (MANDATORY)
 
-**Use MCP tools for production queries (PREFERRED):**
+**Use MCP tools for production queries (PREFERRED over docker).** PRIMARY: `mcp__clickhouse__run_query` (also `list_databases`, `list_tables`); plus `mcp__honeybadger__list_faults` / `mcp__honeybadger__get_fault` (faults) and `mcp__opensearch__SearchIndexTool` (logs). FALLBACK ONLY if MCP unavailable: `docker compose exec clickhouse clickhouse-client --query "..."`.
 
 ```ruby
-# ✅ PRIMARY METHOD: Use MCP ClickHouse tool
 mcp__clickhouse__run_query:
   query: "SELECT count(*) as total_rows FROM pbp_productionDB_optimized.<table>"
-
-# Available MCP Data Tools:
-# - mcp__clickhouse__run_query - Execute production queries
-# - mcp__clickhouse__list_databases - List available databases
-# - mcp__clickhouse__list_tables - List tables with schema
-# - mcp__honeybadger__* - Error tracking and fault analysis
-# - mcp__opensearch__* - Search logs and patterns
-
-# ❌ FALLBACK ONLY: Docker (if MCP unavailable)
-# docker compose exec clickhouse clickhouse-client --query "..."
 ```
 
 **ALWAYS check production data before designing:**
@@ -521,232 +363,13 @@ Before handing off a design proposal or ADR, grep your own plan for these signal
 
 ---
 
-## Examples
+## Examples & MCP Integrations
 
-### Example 1: Push Notifications Feature
-
-```
-/architect push notifications system
-
-## ADR: Push Notifications
-
-### Context
-Need to send push notifications to mobile users for reservations,
-membership renewals, and promotions.
-
-### Production Data Analysis (ClickHouse)
-- Users table: 450k records
-- Active users (last 30 days): 52k
-- Facilities: 180
-- Avg users per facility: 2,500
-
-### Decision
-**Location:** `packs/push_notifications/`
-**Pattern:**
-  - `PushNotifications::SendService` (Interactor) for sending
-  - `PushNotifications::TokenManager` for device tokens
-  - Sidekiq job for bulk sends
-
-**Schema:**
-```ruby
-create_table :push_notification_tokens do |t|
-  t.references :facility, null: false
-  t.references :user, null: false
-  t.string :device_token, null: false
-  t.string :platform, null: false  # ios, android
-  t.boolean :active, default: true
-  t.timestamps
-end
-add_index :push_notification_tokens, [:facility_id, :user_id]
-add_index :push_notification_tokens, [:device_token], unique: true
-```
-
-**API:**
-- `registerPushToken` mutation
-- `unregisterPushToken` mutation
-
-### Implementation Plan
-1. Create pack structure
-2. Add migration for tokens table
-3. Implement TokenManager service
-4. Add GraphQL mutations
-5. Implement SendService with Firebase integration
-6. Add Sidekiq job for bulk notifications
-```
+- Worked ADR example (Push Notifications feature): see [reference/examples.md](reference/examples.md).
+- Architecture diagrams: `mcp__mermaid__*` does not exist in this environment — use text-based diagrams in ADRs.
 
 ---
 
-## MCP Integrations
+## Kaizen
 
-<!-- mcp__mermaid__* removed — server does not exist in this environment (Fable audit 2026-06-10). Use text-based architecture diagrams in ADRs instead. -->
-
----
-
-## Gradual Layerification (Refactoring Roadmap)
-
-> Inspired by palkan's "Layered Design for Ruby on Rails Applications"
-
-When proposing refactoring of existing code, use a **gradual adoption** approach instead of big-bang rewrites. Evaluate the current style and create a phased roadmap with escape hatches.
-
-### Step 1: Assess Current Style
-
-| Style | Description | Signs |
-|-------|-------------|-------|
-| **DHH/Majestic Monolith** | Fat models/controllers, minimal services | All logic in models, few `app/services/` files |
-| **Partially Layered** | Some services, but inconsistent | Mix of fat models and service objects |
-| **Fully Layered** | Clear separation: models, services, policies, presenters | Consistent service layer, thin models/controllers |
-
-```bash
-# Quick assessment
-echo "=== Service count ==="
-find app/services -name "*.rb" 2>/dev/null | wc -l
-
-echo "=== Average model size ==="
-wc -l app/models/*.rb | sort -rn | head -5
-
-echo "=== Existing patterns ==="
-grep -rl "< ApplicationService\|include Interactor\|class.*Policy" app/ --include="*.rb" | head -10
-```
-
-### Step 2: Match Existing Patterns
-
-**CRITICAL**: Before introducing new patterns, find what's already used in the codebase:
-
-```bash
-# What service pattern does this project use?
-grep -rn "< ApplicationService" app/services/ --include="*.rb" | head -5
-grep -rn "include Interactor" app/services/ --include="*.rb" | head -5
-
-# Are there existing policy objects?
-ls app/policies/ 2>/dev/null
-
-# Are there existing form objects?
-find app -name "*form*" -o -name "*contract*" | grep -v spec | grep -v node_modules
-
-# Are there existing query objects?
-find app -name "*query*" -o -name "*finder*" | grep -v spec | grep -v node_modules
-```
-
-**Rule**: Follow existing patterns. If the project uses `ApplicationService`, don't introduce `Interactor`. If there are no policy objects, don't add them for one feature.
-
-### Step 3: Create Phased Roadmap
-
-**Phase 1: Extract Operations (Highest ROI)**
-- Move callback operations (score 1-2) to service objects
-- Target: `after_create` callbacks that send emails, sync external data
-- **Stop here if**: Team velocity is good and codebase is manageable
-
-**Phase 2: Extract Query Objects (Medium ROI)**
-- Move complex scopes (>3 lines) to query objects
-- Target: Scopes with joins, subqueries, or conditional logic
-- **Stop here if**: Models have <20 scopes each
-
-**Phase 3: Add Policy Layer (When Needed)**
-- Extract authorization logic from controllers/models
-- Target: Complex permission rules, multi-role access
-- **Stop here if**: CanCanCan abilities are simple and maintainable
-
-**Phase 4: Add Presenter/Form Objects (Low ROI Unless Pain)**
-- Extract view logic to presenters
-- Extract complex form validations to form objects
-- **Stop here if**: Views are simple, forms map 1:1 to models
-
-### Phase Escape Hatches
-
-Each phase should include a "stop here" evaluation:
-
-```markdown
-## Refactoring Checkpoint: Phase N Complete
-
-### Value Delivered
-- [List improvements achieved]
-
-### Remaining Pain Points
-- [List remaining issues]
-
-### Stop Here If:
-- [ ] Remaining issues don't justify the effort
-- [ ] Team is unfamiliar with the new patterns
-- [ ] Feature velocity would decrease with more abstraction
-
-### Continue If:
-- [ ] Multiple developers hit the same pain points
-- [ ] Bug rate in affected area is high
-- [ ] New features require touching 5+ files (shotgun surgery)
-```
-
-### PBP-Specific Guidance
-
-Given PBP's current state (900+ migrations (run `ls db/migrate | wc -l`), 14 gateways, mix of ApplicationService and Interactor):
-
-1. **Don't introduce new patterns** — PBP already has `ApplicationService` and `Interactor`. Use what exists.
-2. **Focus Phase 1 on payment models** — Most callback violations are in payment/membership models.
-3. **Phase 2 query objects are low priority** — PBP uses scopes effectively.
-4. **Phase 3 underway** — The project uses `action_policy` gem (NOT Pundit). Real policies live in `packs/orgs/app/policies/` (`Orgs::BasePolicy`), `packs/internal_backend/app/policies/internal/` (internal admin policies: `Internal::BasePolicy`, `Internal::FacilityPolicy`, etc.), and `app/policies/` (nearly empty, only `UserPasswordUpdatePolicy`). Follow those patterns for authorization.
-5. **Phase 4 is not needed** — ERB views are simple enough. No ViewComponent/presenter needed.
-
----
-
-## Kaizen: Continuous Improvement
-
-> "Every day we must improve" - 改善
-
-**While executing this skill**, if you discover:
-- A new architecture pattern to document
-- A missing decision criteria
-- A better ClickHouse query for analysis
-
-**You MUST**:
-1. Complete the current architecture review first
-2. Then append improvements to this skill file using Edit tool
-3. Format: `<!-- Kaizen: YYYY-MM-DD --> New content`
-
-**Recent Improvements**:
-
-<!-- Kaizen: 2026-01-31 - MCP Tools Integration -->
-**Issue**: Step 3 didn't mention MCP tools for ClickHouse access, assumed docker-compose
-**Root Cause**: Skill tried `docker compose exec clickhouse` first, failed, then remembered MCP exists
-**Fix Applied**:
-- Added MCP tools section at START of Step 3 (before SQL examples)
-- Listed available MCP tools: clickhouse, honeybadger, opensearch
-- Made MCP PRIMARY method, docker FALLBACK only
-- Updated examples to show `mcp__clickhouse__run_select_query` usage
-
-**Impact**: High (affects all /architect runs that need production data)
-**Effort**: Low (5-minute documentation update)
-**ROI**: 3.0 (Never fails to access ClickHouse, more reliable)
-
-**Lesson Learned**: When MCP tools are available, they should be mentioned FIRST in any data access steps, not as fallback. Pattern applies to: /debug, /performance, /memberships, /code-review skills.
-
-<!-- Kaizen: 2026-05-22 - User correction -->
-- Rule: Respect approved scope before enforcing a destructive step (DELETE/cleanup) — never design one as a default/enforced behavior if the ticket marked it out-of-scope. Approval of X (e.g. links) ≠ approval to delete other tables.
-- Why: In CORE-624 I nearly designed faves/user_stats deletion into the engine as an enforced default; the user caught that Erick had scoped those tables out — the exact scope creep (L3) I had criticized in TRIAGE-10.
-- How to apply: When designing, re-read the approval record ("Out of scope / Pendiente / cleanup separado") before adding a destructive step as default/enforced. If out of scope: leave it out or strictly opt-in pending separate sign-off. Distinguish integrity consequences of an approved action (touch/reindex) from new destructive ops on other tables.
-- Source: User correction on 2026-05-22. See `~/.claude/projects/-Users-leon-workspace-pbp-platform/memory/feedback_respect_approved_scope.md`.
-
-<!-- Kaizen: 2026-05-25 - User correction -->
-- Rule: When deciding "where code/docs live", classify team-shared vs personal FIRST. Personal/local files (linked from `CLAUDE.local.md`, workflow notes, ticket research) NEVER go in `docs/` (committed); they go to gitignored locations.
-- Why: While extracting reference docs out of `CLAUDE.local.md`, I placed them in `docs/development/` (committed) — personal notes would have reached the team repo. User: "si son local no deben estar donde es la doc de todo el equipo".
-- How to apply: For any file-location decision, run `git check-ignore <path>` to confirm intent. In this repo: `docs/` = team/committed; `investigations/` + `.claude/` = personal/excluded; add new excluded paths to `.git/info/exclude` (local), NOT `.gitignore` (team).
-- Source: User correction on 2026-05-25. See `~/.claude/projects/-Users-leon-workspace-pbp-platform/memory/feedback_personal_files_excluded_location.md`.
-
-<!-- Kaizen: 2026-06-05 - User correction -->
-- Rule: When grounding a design in library/API docs, a NEGATIVE result ("the SDK has no X") is LOW-CONFIDENCE. Confirm against the authoritative structural source (Context7 dataclass/signature dump, or the reference/config page) before designing around the absence; an independent auditor contradicting a negative is high-signal.
-- Why: A docs-research agent over-trusts the first page; a negative is unfalsifiable from one search. `max_budget_usd` was called non-existent (wrong SDK pages searched) but the Context7 dataclass showed it exists — nearly shipped a design that self-tracked cost instead of using the native cap.
-- How to apply: For any design-affecting "X doesn't exist", run a targeted Context7 query for the exact type/dataclass/signature first; prefer a second independent check before committing the design.
-- Source: User correction on 2026-06-05. See `~/.claude/projects/-Users-leon-workspace-pbp-platform/memory/feedback_negative_research_result_low_confidence.md`.
-
-<!-- Kaizen: 2026-06-10 — MCP tool-name + org sweep (Fable audit Tier 2') -->
-- Updated stale MCP tool names to the current environment (ClickHouse run_select_query → run_query).
-- Removed references to nonexistent server: mcp__mermaid__* (replaced with text note in MCP Integrations section).
-- Fixed authorization guidance: replaced Pundit with the actual gem (`action_policy`), updated example to resolve `action_policy`, corrected policy location to `packs/orgs/app/policies/` (`Orgs::BasePolicy`) and noted `app/policies/` is nearly empty.
-
-<!-- Kaizen: 2026-06-10 — Lateral propagation fix: AuthorizedController (fictional) replaced with ApplicationController (real, verified ls app/controllers/); migration count updated from stale "852+" to "900+ (run ls db/migrate | wc -l)" (verified: 933); internal_backend slice added to Phase 3 policy guidance: packs/internal_backend/app/policies/internal/ (verified ls). Fable re-audit: lateral propagation. -->
-
-<!-- kaizen 2026-06-09: "implement the plan" = classify by executor first -->
-When the user says "implement the plan / do it" over a plan, run a CLASSIFICATION pass before any coding: tag each item {me-now / user-interactive-action / external-sign-off-gated / no-op}. Adoption/meta/strategy plans often have little-to-no code-for-me — do only the me-now subset (gitignored prep), hand the user their commands, DRAFT (never auto-send/commit) gated items, and name no-ops as done-by-decision. Do not fabricate busywork or cross a sign-off/commit/destructive gate. See memory feedback_implement_plan_classify_by_executor.
-
-<!-- Kaizen: 2026-06-13 - User correction (coordinator delegates investigation) -->
-- Rule: When `/architect` runs under an `/orchestrate` coordinator, the coordinator does NOT do the research/investigation itself — it dispatches it (architect as a worker/analyst, or `Agent(Explore)` for searches). The coordinator only reads trivially to plan the dispatch.
-- Why: pure-coordinator contract — the coordinator orchestrates, never does real work (no Bash/edits/investigation in-thread).
-- Source: User correction on 2026-06-13. See `~/.claude/projects/-Users-leon-workspace-pbp-platform/memory/feedback_coordinator_delegates_all_work.md`.
+Continuous-improvement history lives in [kaizen_log.md](kaizen_log.md) (sibling-skill convention). When you discover a new pattern, missing criterion, or better ClickHouse query: finish the current review first, then append an entry there (`<!-- Kaizen: YYYY-MM-DD --> …`). Do NOT inline Kaizen entries back into this file.
