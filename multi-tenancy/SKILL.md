@@ -33,38 +33,19 @@ Validates that all data access is properly scoped to ensure tenant isolation acr
 
 ## CRITICAL RULES
 
-**1. All queries MUST be scoped to the correct facility** via a direct `facility_id` column OR the canonical association path for that table (see Tenancy Map below). Not all tables carry `facility_id` directly — using the wrong pattern (e.g. `User.where(facility_id:)` when `users` has no such column) silently bypasses isolation or raises a column error. Unless explicitly accessing:
-- Admin-level data (with query override)
-- Global/system configurations
-- Franchise/Group-level aggregations (documented)
+> Base multi-tenancy rules live in [Critical Rules](../shared/critical-rules.md). The rule **unique to
+> this skill**: scope via the *correct column or association path per table* — not every table has a
+> `facility_id` column (see Tenancy Map). Using the wrong pattern (e.g. `User.where(facility_id:)` when
+> `users` has none) silently bypasses isolation or raises a column error. Data leakage between
+> facilities is a critical security vulnerability: a user at Facility A must NEVER see Facility B data.
 
-**2. Cross-facility queries require documented justification**
-
-**3. Facility groups require bidirectional scoping**
-
-## Why This Matters
-
-Data leakage between facilities is a **critical security vulnerability**. A user at Facility A should NEVER see data from Facility B.
+Scope-bypass is allowed ONLY for documented exceptions: admin overrides, global/system config, and
+franchise/group aggregations. Cross-facility queries need written justification; facility groups need
+bidirectional scoping.
 
 ## Multi-Tenancy Hierarchy
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        FRANCHISE OWNER                           │
-│         (Can access all facilities they own)                     │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  ┌─────────────────────┐    ┌─────────────────────┐             │
-│  │  FACILITY GROUP A   │    │  FACILITY GROUP B   │             │
-│  │  (Related venues)   │    │  (Related venues)   │             │
-│  ├─────────────────────┤    ├─────────────────────┤             │
-│  │ ┌───────┐ ┌───────┐ │    │ ┌───────┐ ┌───────┐ │             │
-│  │ │Fac 1  │ │Fac 2  │ │    │ │Fac 3  │ │Fac 4  │ │             │
-│  │ └───────┘ └───────┘ │    │ └───────┘ └───────┘ │             │
-│  └─────────────────────┘    └─────────────────────┘             │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
-```
+> ASCII hierarchy diagram (Franchise → Group → Facility): [reference/hierarchy.md](reference/hierarchy.md).
 
 ### Level 1: Facility Scoping (Primary)
 
@@ -128,9 +109,9 @@ Not all tables carry `facility_id` directly. Use the correct association path fo
 | Table / Model | facility_id column? | Correct scoping pattern | Source |
 |---|---|---|---|
 | `courts` | YES (direct) | `Court.where(facility_id:)` or `facility.courts` | courts.facility_id direct FK |
-| `payments` | YES (direct) | `Payment.where(facility_id:)` or `facility.payments` | facility.rb:275 `has_many :payments` |
-| `users` | NO — global records, M2M via join tables | `facility.users` (through `facilities_users`) or `facility.users_who_linked` (through `facility_user_links`) | facility.rb:202 `has_many :users, through: :facilities_users` |
-| `reservations` | NO — scoped via `court_id` | `facility.reservations` (through courts) | reservation.rb:138 `has_one :facility, through: :court`; facility.rb:183 `has_many :reservations, through: :courts` |
+| `payments` | YES (direct) | `Payment.where(facility_id:)` or `facility.payments` | facility.rb:276 `has_many :payments` |
+| `users` | NO — global records, M2M via join tables | `facility.users` (through `facilities_users`) or `facility.users_who_linked` (through `facility_user_links`) | facility.rb:203 `has_many :users, through: :facilities_users` |
+| `reservations` | NO — scoped via `court_id` | `facility.reservations` (through courts) | reservation.rb:138 `has_one :facility, through: :court`; facility.rb:184 `has_many :reservations, through: :courts` |
 | `memberships` | NO — scoped via `membership_plan` chain | `facility.memberships` (through membership_plans) | membership.rb:147 `delegate :owner_facility, to: :membership_plan`; membership.rb:99 `belongs_to :purchased_at_facility` |
 
 **Key rule**: never write `User.where(facility_id: ...)`, `Reservation.where(facility_id: ...)`, or `Membership.where(facility_id: ...)` — those columns do not exist. Always traverse the association path.
@@ -175,7 +156,7 @@ current_facility.payments.where(status: 'paid')
 
 **PATTERN 1: Global Court lookup in GraphQL — no facility scope at lookup site**
 ```ruby
-# app/graphql/types/query_type.rb:111-113 (verified 2026-06-10)
+# app/graphql/types/query_type.rb:115-116 (verified 2026-06-14)
 def court(**params)
   Court.find(params[:id])   # no facility scope at lookup site
 end
@@ -193,9 +174,10 @@ reservation = Reservation.find(params[:reservation_id])
 
 **PATTERN 3: Global Payment lookup in downloads controller**
 ```ruby
-# app/controllers/downloads_controller.rb:36 (verified 2026-06-10)
-@payment = Payment.find(params[:id])
-# Note: payments.facility_id exists; a scope would be current_facility.payments.find(params[:id])
+# app/controllers/downloads_controller.rb:35-36 (verified 2026-06-14)
+@payment = Payment.find(params[:id]) if Payment.exists?(id: params[:id])
+# Note: the live code guards with Payment.exists?(id:) before find — but still no facility scope.
+# payments.facility_id exists; a scope would be current_facility.payments.find(params[:id]).
 # Controller uses token-based auth (before_action :verify_auth_with_token) — verify if that scopes.
 ```
 
@@ -207,103 +189,48 @@ user = User.find_by(email: email)
 # by design. This is an example of intentional global access, not a missing scope.
 ```
 
-### Step 4: Verify in Production Data
+### Step 4: Verify in Production Data (ClickHouse)
 
-> 📖 **See [ClickHouse Queries](../shared/clickhouse-queries.md) for more queries.**
-> **Schema note**: `users` and `reservations` have NO `facility_id` column. Use `courts` or `payments` for facility-distribution checks. Use JOIN through `courts` for reservation distribution.
+> 📖 Full query set — column check, orphaned records, distribution, group boundaries, reservation
+> distribution (courts join), parent-child consistency — in
+> [ClickHouse Queries](../shared/clickhouse-queries.md) §4–7c.
+> **Schema note**: `users` and `reservations` have NO `facility_id`. Use `courts`/`payments` for
+> distribution checks; JOIN through `courts` for reservation distribution.
 
-Use ClickHouse to verify data isolation patterns:
+Two canonical checks (rest in the shared doc):
 
 ```sql
--- Check if a table that SHOULD have facility_id actually has it (e.g. courts, payments)
+-- 1. Does a table that SHOULD carry facility_id actually have it? (e.g. courts, payments)
 SELECT column_name, data_type
 FROM system.columns
 WHERE database = 'pbp_productionDB_optimized'
-AND table = 'courts'
-AND column_name = 'facility_id';
-```
-**Expected**: `1 row: facility_id | Int64`
-**If 0 rows**: ❌ CRITICAL — Table missing facility_id (data leakage risk)
+  AND table = 'courts' AND column_name = 'facility_id';
+-- Expected 1 row (facility_id | Int64). 0 rows = CRITICAL: missing column, leakage risk.
 
-```sql
--- Check for orphaned court records (no facility_id)
-SELECT count(*) as orphaned
-FROM pbp_productionDB_optimized.courts
-WHERE facility_id IS NULL OR facility_id = 0;
-```
-**Expected**: `0 rows` (all courts must have facility_id)
-**If >0**: ❌ Data integrity issue — orphaned court records found
-
-```sql
--- Verify reservation distribution across facilities (via courts join — reservations has no facility_id)
-SELECT c.facility_id, count(*) as record_count
-FROM pbp_productionDB_optimized.reservations r
-JOIN pbp_productionDB_optimized.courts c ON r.court_id = c.id
-GROUP BY c.facility_id
-ORDER BY record_count DESC
-LIMIT 20;
-```
-**Expected**: Multiple facilities with reasonable distribution
-**If 1 facility has 90%+**: ⚠️ Possible data leak or test data contamination
-
-```sql
--- Verify payment distribution across facilities (payments has direct facility_id)
-SELECT facility_id, count(*) as record_count
-FROM pbp_productionDB_optimized.payments
-GROUP BY facility_id
-ORDER BY record_count DESC
-LIMIT 20;
-```
-
-### Step 5: Verify Facility Group Boundaries
-
-```sql
--- Check webhooks crossing group boundaries (VIOLATION)
-SELECT
-  wu.id as webhook_id,
-  wu.name,
-  count(DISTINCT f.facility_group_id) as group_count
+-- 2. Webhooks crossing facility-group boundaries (VIOLATION if any rows)
+SELECT wu.id, wu.name, count(DISTINCT f.facility_group_id) AS group_count
 FROM pbp_productionDB_optimized.webhooks_urls wu
 JOIN pbp_productionDB_optimized.webhooks_facility_urls wuf ON wuf.webhooks_url_id = wu.id
 JOIN pbp_productionDB_optimized.facilities f ON f.id = wuf.facility_id
-GROUP BY wu.id, wu.name
-HAVING group_count > 1;
-
--- Check parent-child consistency
-SELECT
-  f.id,
-  f.name,
-  f.parent_facility_id,
-  pf.name as parent_name
-FROM pbp_productionDB_optimized.facilities f
-LEFT JOIN pbp_productionDB_optimized.facilities pf ON f.parent_facility_id = pf.id
-WHERE f.parent_facility_id IS NOT NULL
-  AND pf.id IS NULL;  -- Orphaned parent references
+GROUP BY wu.id, wu.name HAVING group_count > 1;
+-- Expected 0 rows.
 ```
 
 ## Quick Validation Commands
 
-**Fast violation detection** (run these first):
+**Fast violation detection** (HIGH unless noted). Zero matches expected:
 
 ```bash
-# Find unscoped queries (HIGH RISK)
-grep -rn "User\.find\|User\.where\|User\.find_by" app/ --include="*.rb" | grep -v "facility\|current_facility"
-
-# Find global model queries (MEDIUM RISK)
-grep -rn "Reservation\.find\|Payment\.find\|Membership\.find" app/ --include="*.rb" | grep -v "facility"
-
-# Find params[:id] usage without facility scope (HIGH RISK)
-grep -rn "\.find(params\[:id\])" app/ --include="*.rb"
-
-# Find .all without scoping (MEDIUM RISK)
-grep -rn "\.all\b" app/ --include="*.rb" | grep -v "facility\|admin"
+grep -rn "User\.find\|User\.where\|User\.find_by" app/ --include="*.rb" | grep -v "facility\|current_facility"  # unscoped User
+grep -rn "Reservation\.find\|Payment\.find\|Membership\.find" app/ --include="*.rb" | grep -v "facility"        # global model lookups (MEDIUM)
+grep -rn "\.find(params\[:id\])" app/ --include="*.rb"                                                          # unscoped params[:id]
+grep -rn "\.all\b" app/ --include="*.rb" | grep -v "facility\|admin"                                           # unscoped .all (MEDIUM)
 ```
 
-**Expected**: Zero matches (all queries should include facility scoping)
-
-> Use `Grep` and `Glob` for symbol-level discovery.
->
-> **📖 See [ast-grep Patterns](../shared/ast-grep-patterns.md)** when `sg` is installed: `sg run --lang ruby --pattern '$M.find(params[:id])' app/ packs/` matches only real `.find(params[:id])` call expressions — avoids both the comment/string false positives AND the false negatives caused by the fragile `grep -v facility` filter (which kills correctly scoped `@facility.x.find(params[:id])` lines). Otherwise this grep is the right tool.
+> **📖 Prefer [ast-grep Patterns](../shared/ast-grep-patterns.md)** when `sg` is installed:
+> `sg run --lang ruby --pattern '$M.find(params[:id])' app/ packs/` matches only real call expressions
+> — avoids comment/string false positives AND the false negatives of `grep -v facility` (which kills
+> correctly scoped `@facility.x.find(params[:id])`). Otherwise the grep above is the right tool.
 
 ## Patterns
 
@@ -373,59 +300,16 @@ class ReservationsResolver < BaseResolver
 end
 ```
 
-## Exceptions (MUST BE DOCUMENTED)
+## Exceptions (MUST BE DOCUMENTED + AUDITED)
 
-### Exception 1: Admin Query Override
+Each scope-bypass below is legitimate ONLY with an inline `# <KIND> OVERRIDE:` comment explaining why.
 
-```ruby
-# Admin users can access cross-facility data
-# MUST be explicitly documented and audited
-class AdminUsersController < AdminController
-  def index
-    # ADMIN OVERRIDE: Cross-facility access for support
-    @users = User.all.includes(:facilities)
-  end
-end
-```
-
-### Exception 2: Franchise Aggregation
-
-```ruby
-# Franchise-level reporting (documented exception)
-# FRANCHISE OVERRIDE: Aggregate across owned facilities
-class FranchiseReportsController < FranchiseController
-  def revenue
-    @revenue = current_franchise.facilities.sum(:monthly_revenue)
-  end
-end
-```
-
-### Exception 3: Facility Group Shared Resources
-
-```ruby
-# Webhooks can be shared within a facility group
-# GROUP OVERRIDE: Same facility_group_id only
-class WebhookService
-  def facilities_for_webhook(webhook)
-    # Only facilities in same group can share webhook
-    webhook.facilities.where(facility_group_id: primary_facility.facility_group_id)
-  end
-end
-```
-
-### Exception 4: Parent-Child Cross-Access
-
-```ruby
-# Child facility accessing parent resources
-# PARENT-CHILD OVERRIDE: Documented family relationship
-class FamilyMembershipService
-  def shared_plans
-    # Child can see parent's membership plans
-    # MembershipPlan uses owner_facility_id (belongs_to :owner_facility) — NOT facility_id
-    MembershipPlan.where(owner_facility: current_facility.family_facilities)
-  end
-end
-```
+| Override kind | Scope rule | Canonical example |
+|---|---|---|
+| Admin | Cross-facility, support/admin context only | `User.all.includes(:facilities)` in an `AdminController` |
+| Franchise aggregation | Aggregate across owned facilities | `current_franchise.facilities.sum(:monthly_revenue)` |
+| Facility group shared | Same `facility_group_id` only | `webhook.facilities.where(facility_group_id: primary_facility.facility_group_id)` |
+| Parent-child | Documented family relationship | `MembershipPlan.where(owner_facility: current_facility.family_facilities)` — note: `MembershipPlan` uses `owner_facility_id`, NOT `facility_id` |
 
 ## Checklist
 
@@ -446,77 +330,10 @@ For each data access in changed code:
 - [ ] Query is documented franchise aggregation OR
 - [ ] Query is documented group-level shared resource
 
-## Report Format
+## Output Format & Worked Example
 
-> **Note**: The paths below are HYPOTHETICAL placeholders — they do not correspond to real files in the codebase.
-
-```markdown
-## Multi-Tenancy Audit
-
-### Files Analyzed
-- app/services/example_service.rb
-- app/controllers/api/example_controller.rb
-
-### Data Access Points Found: 5
-
-### Properly Scoped: 4
-| Location | Pattern | Status |
-|----------|---------|--------|
-| example_service.rb:23 | facility.reservations | ✅ |
-| api/example_controller.rb:15 | current_facility.reservations | ✅ |
-
-### Violations Found: 1
-| Location | Code | Risk | Fix |
-|----------|------|------|-----|
-| example_service.rb:45 | `User.find(user_id)` | HIGH | Use `facility.users.find(user_id)` |
-
-### Recommendations
-1. Fix violation at example_service.rb:45
-2. Add facility scope to User lookup
-```
-
-## Example
-
-> **Note**: The paths below are HYPOTHETICAL for illustration purposes — they do not correspond to real files in the codebase. For real instances verified against the repo see Step 3 above.
-
-```
-User: /multi-tenancy
-
-Claude:
-## Multi-Tenancy Audit
-
-### Scanning changed files...
-Files: app/services/hypothetical_booking_service.rb  # <-- HYPOTHETICAL PATH
-
-### Data Access Points
-Line 23: facility.memberships.active              ✅ Properly scoped (via membership_plans chain)
-Line 45: User.find_by(email: params[:email])      ⚠️ CHECK INTENT — users are global; OK for login/magic-link, NOT OK for facility-scoped lookups
-Line 67: current_facility.payments.create         ✅ Properly scoped (payments has facility_id)
-Line 89: Reservation.find(params[:id])            ❌ UNSCOPED — reservations has no facility_id; scope via facility.reservations.find(...)
-
-### Patterns Requiring Review: 2
-
-#### Line 45 — User lookup (check intent)
-```ruby
-# Global lookup — correct for cross-facility auth flows (magic link, login)
-user = User.find_by(email: params[:email])
-
-# If this is a facility-scoped lookup (e.g. "does this user belong to MY facility"):
-user = facility.users.find_by(email: params[:email])
-```
-
-#### Line 89 — Reservation without facility scope
-```ruby
-# UNSCOPED
-reservation = Reservation.find(params[:id])
-
-# SCOPED (reservations has no facility_id; go through facility association)
-reservation = current_facility.reservations.find(params[:id])
-```
-
-### Action Required
-Verify intent on User lookup; fix Reservation scope.
-```
+> Audit-output template + a full worked transcript (all HYPOTHETICAL paths — real instances are in
+> Step 3 above): [reference/output-templates.md](reference/output-templates.md).
 
 ---
 

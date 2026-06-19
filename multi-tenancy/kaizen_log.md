@@ -44,3 +44,27 @@ Archived from SKILL.md on 2026-06-14. Active body is in SKILL.md.
 <!-- Kaizen: 2026-06-10 — ClickHouse MCP tool name: run_select_query → run_query (residue cleanup, Fable audit Tier 2') -->
 
 <!-- Kaizen: 2026-06-10 — Lateral propagation fix: default_scope example replaced Reservation (no facility_id) with Court (verified facility_id in db/structure.sql); Exception 4 fixed MembershipPlan.where(facility:) → where(owner_facility:) matching real belongs_to :owner_facility association (verified app/models/membership_plan.rb:64). Fable re-audit: lateral propagation. -->
+
+---
+
+<!-- Kaizen: 2026-06-14 — /optimize-skill pass -->
+**Optimize-skill: line-ref drift fixes + relocation/densify/dedup (body 539 → 356 lines)**
+
+**Correctness (verified against live repo 2026-06-14):**
+- Tenancy Map source refs corrected for +1 drift: `facility.rb:275→276` (`has_many :payments`), `202→203` (`has_many :users, through: :facilities_users`), `183→184` (`has_many :reservations, through: :courts`). reservation.rb:138 and membership.rb:147/99 were already accurate.
+- Step 3 PATTERN 1 re-anchored `query_type.rb:111-113 → 115-116` (`def court`).
+- Step 3 PATTERN 3 (`downloads_controller.rb`) now shows the live `Payment.exists?(id:)` guard at line 35-36 (still no facility scope — the verify-intent caveat stands).
+
+**Relocate (capability preserved, one-level-deep pointers):**
+- ASCII hierarchy diagram → `reference/hierarchy.md`.
+- Step 4/5 ClickHouse SQL → kept 2 canonical examples inline; unique schema-aware queries (reservation-via-courts distribution §7b, parent-child consistency §7c) appended to `../shared/clickhouse-queries.md`; rest already covered by shared §4–7.
+- Report Format + worked Example transcript → `reference/output-templates.md`.
+
+**Densify / dedup:**
+- Four near-identical Exception class wrappers collapsed into one table (kind | scope rule | example).
+- CRITICAL RULES restatement replaced with pointer to `../shared/critical-rules.md` + the table-unique wrong-column rule; "Why This Matters" folded into one imperative line.
+- Quick Validation grep block deduped to a single 4-command set.
+
+**Deferred (USER-DECISION, not applied):** keep exact line refs vs symbol-name refs in Tenancy Map (drift-recurrence vs jump-speed); whether to strip ALL inline ClickHouse SQL in favor of the shared doc; whether `disable-model-invocation` should flip to `true`. Left as-is.
+
+**Lesson**: exact `file:line` anchors rot on every insertion above them — they need re-verification each audit. Symbol-name refs (`facility.rb \`has_many :payments\``) would stop the recurring +N drift but that's a convention change for the user to approve.
