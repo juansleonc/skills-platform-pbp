@@ -54,6 +54,9 @@ bin/d bundle outdated --only-explicit | grep -i "rails\|devise\|rack\|nokogiri\|
 ### 3. Potentially Unused Gems
 
 ```bash
+# NOTE: host-side file scan by design — pure grep over the checkout (no Ruby), so it does NOT need
+# bin/d/Docker (rule #2 governs Ruby/Rails execution). The host checkout IS the source mounted into
+# the web container, so results are identical and faster without the Docker round-trip. Do not "fix" to bin/d.
 # Find gems that may not be referenced in code
 # Extract gem names from Gemfile (excluding groups, comments, ruby version)
 grep "^gem " Gemfile | sed "s/gem '\([^']*\)'.*/\1/" | while read gem_name; do
