@@ -112,13 +112,19 @@ modules:
   - `mock_refund(...)`, `mock_payment_intent(...)`, `mock_customer(...)`, `mock_payment_method(...)`
   - `mock_card_error(...)`, `mock_invalid_request_error(...)`, `mock_api_connection_error(...)`
 
-- **`StripeTestHelper`** (`spec/support/stripe_test_helper.rb`) — included explicitly when needed.
+- **`StripeTestHelper`** (`spec/support/stripe_test_helper.rb`) — auto-included for
+  `type: :service` specs under `spec/services/payment_service/gateway/stripe` AND for
+  `stripe: true`-tagged specs (via `config.include(StripeTestHelper, ...)` in the support file).
+  For stripe gateway specs in that path the `include StripeTestHelper` in the template is
+  harmless but redundant. Include it explicitly only for stripe specs **outside** that path.
   Provides realistic Stripe-object builders:
   - `stripe_payment_intent(...)`, `stripe_payment_method(:visa, ...)`, `stripe_customer(...)`
   - `stripe_charge(...)`, `three_ds_next_action(...)`, `stripe_webhook_event(...)`
 
 Because `StripeMockHelper` is globally auto-included, you do NOT need to `include StripeMockHelper`
-in your spec. Include `StripeTestHelper` only when you need the `stripe_*` builders.
+in your spec. For stripe gateway specs under `spec/services/payment_service/gateway/stripe`,
+`StripeTestHelper` is also auto-included — the explicit `include` in the template matches the
+real spec and is kept for clarity, but is not strictly required there.
 
 **VCR is used only in opt-in integration blocks** gated on `ENV['STRIPE_TEST_KEY'].present?`:
 
@@ -145,8 +151,10 @@ card_connect authorize spec for the pattern.
 
 ## Sandbox Credentials Safety
 
-NEVER hardcode or read real credentials. For Stripe, the service reads from
-`Rails.application.secrets.stripe_secret_key` and `facility.stripe_user_id`. In tests:
+NEVER hardcode or read real credentials. For Stripe, the service reads
+`Rails.application.secrets.stripe_secret_key` for the API key and reaches the connected-account id
+via `context.payment&.facility&.stripe_user_id` — facility is accessed **through the payment**,
+not as a separate top-level context key. In tests:
 
 ```ruby
 # Facility: build_stubbed, pass stripe_user_id as a fake connected-account string

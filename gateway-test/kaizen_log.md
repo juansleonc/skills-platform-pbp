@@ -32,3 +32,15 @@ Archived from SKILL.md on 2026-06-14. Operational lessons that have already been
 - The real refund spec only `include`s `StripeTestHelper` and gets `mock_*` methods via the global auto-include.
 - Promoted corrected attribution into the Stubbing section and template comments in SKILL.md.
 - Self-edit-via-Edit Kaizen anti-pattern removed; use `/kaizen` instead of Edit in this file.
+
+<!-- Kaizen: 2026-06-15 — Fix StripeTestHelper auto-include scope + stripe_user_id access path (optimize-skill correctness pass) -->
+- `StripeTestHelper` is auto-included by RSpec config for `type: :service` specs under
+  `spec/services/payment_service/gateway/stripe` AND for `stripe: true`-tagged specs
+  (verified in `spec/support/stripe_test_helper.rb` lines 407-409). Prose previously stated
+  "included explicitly when needed" without acknowledging the auto-include path — updated
+  to clarify that the `include StripeTestHelper` in the template is redundant for stripe gateway
+  specs in that path (matches the real refund_spec.rb:6 which also includes it redundantly).
+- `stripe_user_id` access path corrected: the service reads it via
+  `context.payment&.facility&.stripe_user_id` (verified in `refund.rb:7`), not from a
+  top-level `facility` context key. Updated Sandbox Credentials prose to reflect the exact
+  access chain. The template behavior was already correct; only the description was imprecise.
