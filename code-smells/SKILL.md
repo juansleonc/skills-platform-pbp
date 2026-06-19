@@ -29,82 +29,20 @@ Identifies structural code smells based on Ruby Science patterns. Covers models,
 
 ## Quick Validation Commands
 
-**Run these first for a fast overview:**
+**Run these first for a fast overview.** Each row is one check — command is in backticks; the expectation tells you when to act. Multi-line `for`/loop commands are written inline with `;` separators.
 
-```bash
-# 1. Fat Models (>200 lines = warning, >400 = critical)
-wc -l app/models/*.rb | sort -rn | head -20
-```
-**Expected**: Most models <200 lines. Review any >200.
-
-```bash
-# 2. Fat Controllers (>150 lines = warning, >300 = critical)
-wc -l app/controllers/**/*.rb | sort -rn | head -20
-```
-**Expected**: Most controllers <150 lines. Review any >150.
-
-```bash
-# 3. Queries in Views (ALWAYS bad)
-grep -rn "\.where\|\.find\|\.find_by\|\.count\|\.sum\|\.order" app/views/ --include="*.erb" --include="*.haml"
-```
-**Expected**: 0 matches (queries belong in controllers/services, not views)
-
-```bash
-# 4. Long parameter lists (methods with 4+ params)
-grep -rn "def \w\+(.*,.*,.*,.*)" app/models/ app/services/ app/controllers/ --include="*.rb" | grep -v "spec\|test\|#"
-```
-**Expected**: Minimal matches. Methods with 4+ params should use keyword args or parameter objects.
-
-```bash
-# 5. Law of Demeter violations (chains 3+ levels)
-grep -rn '\.\w\+\.\w\+\.\w\+\.\w\+' app/models/ app/services/ app/controllers/ --include="*.rb" | grep -v "#\|spec\|test\|Rails\.\|ActiveRecord\.\|logger\."
-```
-**Expected**: Minimal matches. Long chains indicate tight coupling.
-
-```bash
-# 6. Callback complexity (>5 callbacks per model)
-for f in app/models/*.rb; do
-  count=$(grep -c "before_\|after_\|around_" "$f" 2>/dev/null)
-  if [ "$count" -gt 5 ]; then
-    echo "⚠️ $f: $count callbacks"
-  fi
-done
-```
-**Expected**: 0 warnings. Models with >5 callbacks need refactoring.
-
-```bash
-# 7. Monolithic controllers (>7 actions)
-for f in app/controllers/**/*.rb; do
-  count=$(grep -c "def " "$f" 2>/dev/null)
-  if [ "$count" -gt 7 ]; then
-    echo "⚠️ $f: $count methods (>7 actions)"
-  fi
-done
-```
-**Expected**: Standard REST controllers have 7 actions. More suggests splitting.
-
-```bash
-# 8. Mixin abuse (>5 includes per model)
-for f in app/models/*.rb; do
-  count=$(grep -c "include \|extend " "$f" 2>/dev/null)
-  if [ "$count" -gt 5 ]; then
-    echo "⚠️ $f: $count includes/extends"
-  fi
-done
-```
-**Expected**: 0 warnings. Excessive includes hide complexity.
-
-```bash
-# 9. Business logic in controllers
-grep -rn "\.save\|\.update\|\.create\|\.destroy\|\.where.*\.each\|transaction" app/controllers/ --include="*.rb" | grep -v "redirect\|render\|respond\|format\.\|params\.\|#"
-```
-**Expected**: Minimal matches. Business logic belongs in services/models.
-
-```bash
-# 10. Helper complexity (>100 lines)
-wc -l app/helpers/*.rb | sort -rn | head -10
-```
-**Expected**: Helpers <100 lines. Complex helpers → extract to presenters/decorators.
+| # | Smell | Command | Expected |
+|---|-------|---------|----------|
+| 1 | Fat Models (>200 warn, >400 crit) | `wc -l app/models/*.rb \| sort -rn \| head -20` | Most <200; review any >200 |
+| 2 | Fat Controllers (>150 warn, >300 crit) | `find app/controllers -name '*.rb' \| xargs wc -l \| sort -rn \| head -20` | Most <150; review any >150 |
+| 3 | Queries in Views (ALWAYS bad) | `grep -rn "\.where\|\.find\|\.find_by\|\.count\|\.sum\|\.order" app/views/ --include="*.erb" --include="*.haml"` | 0 matches (queries belong in controllers/services) |
+| 4 | Long parameter lists (4+ params) | `grep -rn "def \w\+(.*,.*,.*,.*)" app/models/ app/services/ app/controllers/ --include="*.rb" \| grep -v "spec\|test\|#"` | Minimal; 4+ params → keyword args / parameter objects |
+| 5 | Law of Demeter (chains 3+ levels) | `grep -rn '\.\w\+\.\w\+\.\w\+\.\w\+' app/models/ app/services/ app/controllers/ --include="*.rb" \| grep -v "#\|spec\|test\|Rails\.\|ActiveRecord\.\|logger\."` | Minimal; long chains = tight coupling |
+| 6 | Callback complexity (>5 per model) | `for f in app/models/*.rb; do count=$(grep -c "before_\|after_\|around_" "$f" 2>/dev/null); if [ "$count" -gt 5 ]; then echo "⚠️ $f: $count callbacks"; fi; done` | 0 warnings; >5 callbacks → refactor |
+| 7 | Monolithic controllers (>7 actions) | `find app/controllers -name '*.rb' \| while read -r f; do count=$(grep -c "def " "$f" 2>/dev/null); if [ "$count" -gt 7 ]; then echo "⚠️ $f: $count methods (>7 actions)"; fi; done` | REST = 7 actions; more suggests splitting |
+| 8 | Mixin abuse (>5 includes per model) | `for f in app/models/*.rb; do count=$(grep -c "include \|extend " "$f" 2>/dev/null); if [ "$count" -gt 5 ]; then echo "⚠️ $f: $count includes/extends"; fi; done` | 0 warnings; excessive includes hide complexity |
+| 9 | Business logic in controllers | `grep -rn "\.save\|\.update\|\.create\|\.destroy\|\.where.*\.each\|transaction" app/controllers/ --include="*.rb" \| grep -v "redirect\|render\|respond\|format\.\|params\.\|#"` | Minimal; business logic belongs in services/models |
+| 10 | Helper complexity (>100 lines) | `wc -l app/helpers/*.rb \| sort -rn \| head -10` | Helpers <100 lines; complex → presenters/decorators |
 
 ## Layer Analysis (Layered Design Patterns)
 
@@ -236,6 +174,109 @@ class Membership < ApplicationRecord
   end
 end
 ```
+
+## Gradual Layerification (Refactoring Roadmap)
+
+> Inspired by palkan's "Layered Design for Ruby on Rails Applications"
+
+When proposing refactoring of existing code, use a **gradual adoption** approach instead of big-bang rewrites. Evaluate the current style and create a phased roadmap with escape hatches.
+
+### Step 1: Assess Current Style
+
+| Style | Description | Signs |
+|-------|-------------|-------|
+| **DHH/Majestic Monolith** | Fat models/controllers, minimal services | All logic in models, few `app/services/` files |
+| **Partially Layered** | Some services, but inconsistent | Mix of fat models and service objects |
+| **Fully Layered** | Clear separation: models, services, policies, presenters | Consistent service layer, thin models/controllers |
+
+```bash
+# Quick assessment
+echo "=== Service count ==="
+find app/services -name "*.rb" 2>/dev/null | wc -l
+
+echo "=== Average model size ==="
+wc -l app/models/*.rb | sort -rn | head -5
+
+echo "=== Existing patterns ==="
+grep -rl "< ApplicationService\|include Interactor\|class.*Policy" app/ --include="*.rb" | head -10
+```
+
+### Step 2: Match Existing Patterns
+
+**CRITICAL**: Before introducing new patterns, find what's already used in the codebase:
+
+```bash
+# What service pattern does this project use?
+grep -rn "< ApplicationService" app/services/ --include="*.rb" | head -5
+grep -rn "include Interactor" app/services/ --include="*.rb" | head -5
+
+# Are there existing policy objects?
+ls app/policies/ 2>/dev/null
+
+# Are there existing form objects?
+find app -name "*form*" -o -name "*contract*" | grep -v spec | grep -v node_modules
+
+# Are there existing query objects?
+find app -name "*query*" -o -name "*finder*" | grep -v spec | grep -v node_modules
+```
+
+**Rule**: Follow existing patterns. If the project uses `ApplicationService`, don't introduce `Interactor`. If there are no policy objects, don't add them for one feature.
+
+### Step 3: Create Phased Roadmap
+
+**Phase 1: Extract Operations (Highest ROI)**
+- Move callback operations (score 1-2) to service objects
+- Target: `after_create` callbacks that send emails, sync external data
+- **Stop here if**: Team velocity is good and codebase is manageable
+
+**Phase 2: Extract Query Objects (Medium ROI)**
+- Move complex scopes (>3 lines) to query objects
+- Target: Scopes with joins, subqueries, or conditional logic
+- **Stop here if**: Models have <20 scopes each
+
+**Phase 3: Add Policy Layer (When Needed)**
+- Extract authorization logic from controllers/models
+- Target: Complex permission rules, multi-role access
+- **Stop here if**: CanCanCan abilities are simple and maintainable
+
+**Phase 4: Add Presenter/Form Objects (Low ROI Unless Pain)**
+- Extract view logic to presenters
+- Extract complex form validations to form objects
+- **Stop here if**: Views are simple, forms map 1:1 to models
+
+### Phase Escape Hatches
+
+Each phase should include a "stop here" evaluation:
+
+```markdown
+## Refactoring Checkpoint: Phase N Complete
+
+### Value Delivered
+- [List improvements achieved]
+
+### Remaining Pain Points
+- [List remaining issues]
+
+### Stop Here If:
+- [ ] Remaining issues don't justify the effort
+- [ ] Team is unfamiliar with the new patterns
+- [ ] Feature velocity would decrease with more abstraction
+
+### Continue If:
+- [ ] Multiple developers hit the same pain points
+- [ ] Bug rate in affected area is high
+- [ ] New features require touching 5+ files (shotgun surgery)
+```
+
+### PBP-Specific Guidance
+
+Given PBP's current state (900+ migrations (run `ls db/migrate | wc -l`), 14 gateways, mix of ApplicationService and Interactor):
+
+1. **Don't introduce new patterns** — PBP already has `ApplicationService` and `Interactor`. Use what exists.
+2. **Focus Phase 1 on payment models** — Most callback violations are in payment/membership models.
+3. **Phase 2 query objects are low priority** — PBP uses scopes effectively.
+4. **Phase 3 underway** — The project uses `action_policy` gem (NOT Pundit). Real policies live in `packs/orgs/app/policies/` (`Orgs::BasePolicy`), `packs/internal_backend/app/policies/internal/` (internal admin policies: `Internal::BasePolicy`, `Internal::FacilityPolicy`, etc.), and `app/policies/` (nearly empty, only `UserPasswordUpdatePolicy`). Follow those patterns for authorization.
+5. **Phase 4 is not needed** — ERB views are simple enough. No ViewComponent/presenter needed.
 
 ## Detailed Smell Categories
 
@@ -445,7 +486,7 @@ This skill works with:
 - **`/code-review`** - Includes structural quality check (Step 2.7) and layer validation (Step 2.8)
 - **`/performance`** - Fat models often have N+1 queries
 - **`/rails-audit`** - Orchestrates code-smells as part of full audit
-- **`/architect`** - Design guidance for refactoring flagged smells (see Gradual Layerification)
+- **`/architect`** - Design guidance and code placement for new features; refactoring roadmaps for flagged smells live here (see Gradual Layerification above)
 - **`/sidekiq`** - Anemic job detection complements anemic models detection here
 
 ---
