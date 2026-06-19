@@ -24,6 +24,14 @@ Historical improvement entries. Promoted content is already reflected in the act
 - Why: prior to this skill, every correction had to be manually transcribed into a feedback_*.md file; many were lost
 - ROI: 3.0 (high value preventing repeats, low effort reusing existing memory infrastructure)
 
+<!-- Kaizen: 2026-06-14 — Template drift fix vs live memory system + dedup/relocate -->
+- **A3 (frontmatter drift)**: feedback-file template prescribed a TOP-LEVEL `type: feedback`. Live files (e.g. `feedback_respect_approved_scope.md`, `feedback_no_suppositions_prove_with_evidence.md`) use a NESTED `metadata:` block with `node_type: memory`, `type: feedback`, `originSessionId: <session-uuid>`, plus `name: feedback_<slug>` (slug, not prose title), quoted `description:`, and quoted `updated: "YYYY-MM-DD"`. Corrected the template to the nested shape; also resolved the prior self-contradiction (Phase 4c's own example already showed the nested `metadata:` form).
+- **A4 (index-entry drift)**: MEMORY.md index template prescribed markdown links `- [Title](feedback_<slug>.md) — <hook>`. Live MEMORY.md uses Obsidian wikilinks + dates: `- [[feedback_<slug>]] — updated: YYYY-MM-DD — <hook>`. Corrected.
+- **A5 (wrong destination section)**: skill said append under a `### Lessons Learned` / `### Heading`; that heading does not exist in MEMORY.md. Entries go into the **HOT SET** list ranked by `updated:` desc. Replaced the "Lessons Learned"/`### Heading` framing (Phase 4a + Phase 5 confirmation line) with the real HOT-SET convention.
+- **DEDUP**: the separate Templates section duplicated the 3 templates already inline in Phase 4. Made the Templates section the single canonical (corrected) copy; turned the Phase-4a/4b inline template blocks into one-line pointers to it.
+- **RELOCATE**: moved the 3 worked Examples (~63 lines) verbatim to bundled `examples.md`; left a one-line pointer in the body.
+- Source of truth: live memory files + MEMORY.md HOT SET (read during the fix), not the skill's prior (drifted) prescriptions.
+
 <!-- Kaizen: 2026-06-14 — Skills audit Wave 2 cleanup -->
 - Fixed Phase 4 ordering: was 4a → 4c → checklist → 4b; corrected to 4a → 4b → 4c → checklist (logical execution order matches numbering).
 - Fixed Conflict Resolution `r` action: clarified it maps to `superseded_by:` typed edge, not raw deletion. `k` now explicitly cross-references `conflicts:` typed-edge pathway from Phase 4c.

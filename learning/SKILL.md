@@ -134,49 +134,18 @@ Acciones:
 
 #### 4a. Auto-memory (always on `y` or `m`)
 
-Write `~/.claude/projects/-Users-leon-workspace-pbp-platform/memory/feedback_<slug>.md`:
-
-```markdown
----
-name: <Short title in imperative>
-description: <One-line description for relevance matching by future Claude>
-type: feedback
----
-
-<Rule statement in imperative form, 1-3 lines>
-
-**Why:** <Reason from user or inferred from context>
-
-**How to apply:** <When/where rule applies. Be specific about file types, workflows, or scenarios>
-
-**Source:** Correction on <YYYY-MM-DD> during <brief context — e.g. "PR review of CORE-189">.
-```
+Write `~/.claude/projects/-Users-leon-workspace-pbp-platform/memory/feedback_<slug>.md` using the canonical feedback-memory template in the [Templates](#templates) section. Key shape: `name:` is the slug; `description:` quoted; `updated:` is a quoted `"YYYY-MM-DD"` string (today); `type: feedback` is nested under a `metadata:` block (with `node_type: memory` and `originSessionId: <session-uuid>`) — there is NO top-level `type:` key.
 
 **Slug rules**:
 - `feedback_<topic>.md`, lowercase, snake_case, ≤ 5 words
 - Check existing memories first via `ls ~/.claude/projects/-Users-leon-workspace-pbp-platform/memory/feedback_*.md`
 - If similar exists, prefer **update** over create (use Edit, append `**Update <date>:**` line)
 
-Then update `MEMORY.md` index — append under the appropriate `### Heading` (or create new heading if topic is new):
-
-```markdown
-### <Category Heading>
-- [<Short Title>](<feedback_slug.md>) — <one-line hook, ~150 chars max>
-```
+Then update `MEMORY.md` index — append the entry to the **HOT SET** list (ranked by `updated:` frontmatter desc; a fresh entry with today's `updated:` date sorts to the top). Use an Obsidian wikilink + `updated:` date, NOT a markdown link — see the MEMORY.md index-entry template in the [Templates](#templates) section.
 
 #### 4b. Skill kaizen propagation (only on `y`)
 
-For each skill in the `Affected skills` list, append to its `SKILL.md`:
-
-```markdown
-<!-- Kaizen: YYYY-MM-DD - User correction -->
-- Rule: <Rule statement>
-- Why: <Reason>
-- How to apply: <When/where>
-- Source: User correction on <date>. See `~/.claude/projects/-Users-leon-workspace-pbp-platform/memory/feedback_<slug>.md`.
-```
-
-Place at the end of the skill's "Recent Improvements" / "Kaizen" section. If no such section exists, create one at the end of the file.
+For each skill in the `Affected skills` list, append the skill-kaizen entry (template in the [Templates](#templates) section) to its `SKILL.md`. Place it at the end of the skill's "Recent Improvements" / "Kaizen" section. If no such section exists, create one at the end of the file.
 
 #### 4c. Typed frontmatter edges in topic files (always on `y` or `m`, when a relation is expressed)
 
@@ -237,7 +206,7 @@ metadata:
 ```
 ✅ Guardado:
   📝 ~/.claude/projects/-Users-leon-workspace-pbp-platform/memory/feedback_<slug>.md (nuevo)
-  🔄 MEMORY.md actualizado (sección "Lessons Learned")
+  🔄 MEMORY.md actualizado (entrada nueva en HOT SET, ranked by updated: desc)
   🧠 Propagado a: code-review, tdd, coverage
 
 Próximas conversaciones aplicarán esta regla automáticamente.
@@ -305,15 +274,21 @@ This prevents the skill from becoming annoying.
 
 ## Templates
 
+> **Canonical source.** These three templates are the single source of truth. The Phase 4 inline references point here — do not re-paste the templates elsewhere; edit them here only.
+
 ### Feedback memory file
 
 Path: `~/.claude/projects/-Users-leon-workspace-pbp-platform/memory/feedback_<slug>.md`
 
 ```markdown
 ---
-name: <Short title>
-description: <One-line description used by future Claude to decide relevance>
-type: feedback
+name: feedback_<slug>
+description: "<One-line description used by future Claude to decide relevance>"
+updated: "<YYYY-MM-DD>"
+metadata:
+  node_type: memory
+  type: feedback
+  originSessionId: <session-uuid>
 ---
 
 <Rule in imperative form>
@@ -325,12 +300,14 @@ type: feedback
 **Source:** Correction on <YYYY-MM-DD> during <context>.
 ```
 
+Notes: `name:` is the slug itself (`feedback_<slug>`), not a prose title. There is NO top-level `type:` key — `type: feedback` lives nested under `metadata:`. `updated:` is a quoted `"YYYY-MM-DD"` string (today's date) and drives hot-set recency ranking in MEMORY.md. `originSessionId:` is the current session UUID.
+
 ### MEMORY.md index entry
 
-Append under existing or new `### Heading`:
+Append to the **HOT SET** list (ranked by `updated:` frontmatter desc — a fresh entry sorts to the top). Obsidian wikilink + `updated:` date, NOT a markdown link:
 
 ```markdown
-- [<Title>](feedback_<slug>.md) — <one-line hook ~150 chars>
+- [[feedback_<slug>]] — updated: <YYYY-MM-DD> — <one-line hook ~150 chars>
 ```
 
 ### Skill kaizen entry
@@ -349,67 +326,7 @@ Append at end of target skill:
 
 ## Examples
 
-### Example 1: Style correction
-
-```
-Assistant wrote a 6-line rdoc comment block above a Ruby method.
-
-User: "no, comentarios cortos máximo 1 línea, los detalles van en /docs"
-
-Detected → Extract:
-  Rule:   Inline comments max 1-3 lines; detailed docs go in /docs folder
-  Why:    Code stays lean; rationale belongs in commit/PR/docs
-  Apply:  When writing rdoc, comment blocks, or method documentation
-  Skills: code-review, tdd, architect
-
-User confirms: y
-
-Saved:
-  📝 ~/.claude/.../memory/feedback_lean_comments.md (already exists → updated with new example)
-  🔄 MEMORY.md (entry already present, no change)
-  🧠 Propagado a: code-review, tdd, architect (kaizen entries added)
-```
-
-### Example 2: Workflow correction
-
-```
-Assistant ran `git commit` without running Pronto first.
-
-User: "stop, siempre Pronto antes de commit"
-
-Detected → Extract:
-  Rule:   Always run Pronto before git commit, even for cherry-picks/squashes
-  Why:    PR feedback flagged lint issues that Pronto would have caught
-  Apply:  Before any `git commit` invocation
-  Skills: commit, create-pr, code-review
-
-User confirms: y
-
-Saved:
-  📝 ~/.claude/.../memory/feedback_pronto_before_commit.md (already exists → reinforced)
-  🧠 Propagado a: commit, create-pr, code-review
-```
-
-### Example 3: Naming correction (new memory)
-
-```
-Assistant named a controller `ReservationCancelerController`.
-
-User: "no, en Rails los controllers son adjetivos: AuthorizedController no AuthorizerController"
-
-Detected → Extract:
-  Rule:   Rails controllers use adjective form (Authorized, not Authorizer)
-  Why:    Rails convention; no verbs as class names — classes are categories
-  Apply:  When naming any controller class
-  Skills: code-review, architect
-
-User confirms: y
-
-Saved:
-  📝 ~/.claude/.../memory/feedback_controller_naming.md (NEW)
-  🔄 MEMORY.md → new entry under "### Rails Naming Conventions"
-  🧠 Propagado a: code-review, architect
-```
+Three worked end-to-end examples (style correction, workflow correction, new-memory naming correction) live in [`examples.md`](examples.md).
 
 ---
 
