@@ -1,5 +1,13 @@
 # Query Analyzer — Kaizen Log
 
+<!-- Kaizen: 2026-06-15 — optimize-skill densify/dedup pass -->
+- Removed redundant `> Config Priority` banner (L8) — duplicates project-wide CLAUDE.local.md > CLAUDE.md override rule stated globally.
+- Collapsed `Integration with ClickHouse MCP` section's verbatim SQL block (three queries duplicated from Step 4) into a single pointer to Step 4. Zero capability removed; one canonical source for the volume queries now.
+- Collapsed `Example Usage` + `Integration with Other Skills` multi-block sections into a compact 3-bullet pointer list under the remaining `Integration with Other Skills` header.
+- Result: 421 → 357 lines (-64). All CRITICAL RULES, EXPLAIN red-flags, Query Complexity Scoring table, Report Format template, and Step 4 FINAL rule intact.
+- Deferred (user-decision): FINAL rule triplication (keep as safety-rail reinforcement vs collapse to one); Helper Script section drop.
+- Status: **PROMOTED** — live in SKILL.md.
+
 > Archived from SKILL.md to keep the active skill lean. Lessons promoted into SKILL.md body are noted inline.
 
 <!-- Kaizen: 2026-06-02 - User correction -->

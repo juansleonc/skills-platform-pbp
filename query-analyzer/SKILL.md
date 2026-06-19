@@ -5,8 +5,6 @@ allowed-tools: [Bash, Read, Grep, Glob, Edit, mcp__clickhouse__run_query, mcp__c
 disable-model-invocation: false
 ---
 
-> **📋 Config Priority**: `CLAUDE.local.md` overrides `CLAUDE.md` for local settings (Docker, linting, coverage). Always check both files for current project conventions.
-
 # Query Analyzer Skill
 
 Validates query performance using MySQL EXPLAIN plans and ClickHouse production metrics.
@@ -243,32 +241,7 @@ Assign complexity score to queries:
 
 ## Integration with ClickHouse MCP
 
-> **Scope**: ClickHouse holds replicated copies of application tables (`pbp_productionDB_optimized`). Use it for **volume context** only (see Step 4 for the `system.query_log` caveat and FINAL rule).
-
-### Runnable Volume Queries (via `mcp__clickhouse__run_query`)
-
-Always add `FINAL` on `*ReplacingMergeTree` tables to avoid ~20× row-count inflation.
-
-```sql
--- Total reservations created in the last 30 days
-SELECT count() FROM pbp_productionDB_optimized.reservations FINAL
-WHERE created_at >= today() - 30
-
--- Reservation volume by court (useful before adding a court_id composite index)
-SELECT court_id, count() as total
-FROM pbp_productionDB_optimized.reservations FINAL
-WHERE created_at >= today() - 30
-GROUP BY court_id
-ORDER BY total DESC
-LIMIT 20
-
--- Membership distribution by state (uses real column: aasm_state, not 'active')
-SELECT aasm_state, count() as total
-FROM pbp_productionDB_optimized.memberships FINAL
-WHERE deleted_at = toDateTime(0)
-GROUP BY aasm_state
-ORDER BY total DESC
-```
+> **Scope**: ClickHouse holds replicated copies of application tables (`pbp_productionDB_optimized`). Use it for **volume context** only (see Step 4 for the `system.query_log` caveat, FINAL rule, and runnable volume queries).
 
 ## Report Format
 
@@ -367,48 +340,11 @@ Note: `memberships` has `owner_id` (not `user_id`) and `aasm_state` (not `active
    - Benchmark before/after in Docker (Step 7)
 ```
 
-## Example Usage
-
-```bash
-# Analyze queries in changed files
-/query-analyzer
-
-# Output:
-# 1. Scans git diff for query changes
-# 2. Runs EXPLAIN on each query
-# 3. Checks ClickHouse for production patterns
-# 4. Scores complexity
-# 5. Suggests indexes/optimizations
-# 6. Generates migration if needed
-
-# Then creates report and optionally generates migration:
-# db/migrate/20260128_add_performance_indexes.rb
-```
-
 ## Integration with Other Skills
 
-### With /tdd
-```bash
-# Before writing query tests, validate performance
-/query-analyzer app/services/new_service.rb
-```
-
-### With /performance
-```bash
-# Query-analyzer focuses on SQL-level optimization
-# Performance skill focuses on N+1 detection
-# Use together for complete analysis
-```
-
-### With /orchestrate
-```bash
-# Orchestrate runs query-analyzer in Phase 3 (Database Validation)
-# Automatically checks all model/service changes
-```
-
-## Helper Script
-
-> **Not implemented** — no `lib/query_analyzer.rb` exists in the codebase. Use the commands above (`bin/d rails console` + `puts query.explain`, `grep` on changed files) directly.
+- **`/tdd`** — run `/query-analyzer` on a new service before writing query tests to validate EXPLAIN first
+- **`/performance`** — use together: `/query-analyzer` = SQL-level EXPLAIN + indexes; `/performance` = N+1 detection across a diff
+- **`/orchestrate`** — runs `/query-analyzer` in Phase 3 (Database Validation) for all model/service changes
 
 ---
 
