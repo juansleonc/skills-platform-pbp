@@ -1,6 +1,6 @@
 ---
 name: grill-me
-description: Before building a feature/refactor, the agent interviews YOU until every branch of the decision tree is resolved (ambiguity = 0). The interview transcript becomes the implementation context. Use when requirements are fuzzy, before /architect and /tdd. Inspired by Matt Pocock's /grill-me.
+description: Before building a feature/refactor, the agent interviews YOU until every branch of the decision tree is resolved (ambiguity = 0). The interview transcript becomes the implementation context. Use when requirements are fuzzy, before /architect and /tdd.
 allowed-tools: [AskUserQuestion, Read, Grep, Glob, Bash]
 disable-model-invocation: false
 ---
