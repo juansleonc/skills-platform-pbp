@@ -2595,3 +2595,7 @@ end
 
 ---
 
+
+<!-- Kaizen: 2026-06-19 — Validator/lens model pin fable → opus (availability) -->
+- REVERSAL of the 2026-06-13 change (logged above ~L2196) that upgraded the validator + adversarial-review lenses to `fable`. Fable 5 hit intermittent unavailability ("Claude Fable 5 is currently unavailable") and HARD-FAILED a live validator dispatch this session — a pinned model that can be absent is a robustness risk for a BLOCKING gate.
+- Changed to `opus` (reasoning-heavy quality equivalent for adversarial verification, reliably available) in all 4 functional places: `.claude/agents/validator.md` frontmatter, `adversarial-review/SKILL.md` lens-dispatch instruction, this skill's Phase-3.5 table (L174), and the model-routing note (L180, `opus/fable` → `opus`). "Fable audit" proper-noun references (past audit wave names) left unchanged.
