@@ -19,7 +19,7 @@ Honra la regla de proyecto "draft outward comms — never auto-post" (memory `[[
 
 ```
 PROJECT_KEY   = "CORE"                         # proyecto Jira destino
-DEFAULT_ASSIGNEE = "juansleon@playbypoint.com"  # Preferir email; también acepta display name o accountid:…
+DEFAULT_ASSIGNEE = "<assignee-email>"            # Preferir email; también acepta display name o accountid:…
                                                # NOTA: un bare username puede no resolver en la API de Jira
 DEFAULT_LABELS   = ["spike-followup"]          # siempre incluidos; se agrega <spike-slug> (ej. "core-733")
 ```
@@ -122,7 +122,7 @@ Proyecto    : CORE
 Tipo        : <Bug | Task>  ← mapeado de "<Tipo original>"
 Prioridad   : <High | Medium | Low>  ← mapeado de "<Prioridad original>"
 Esfuerzo    : <texto original>  [campo story-points: <valor si disponible> / "incluido en descripción"]
-Asignado a  : juansleonc
+Asignado a  : <assignee-email>
 Etiquetas   : spike-followup, <spike-slug>
 Sprint      : <nombre/id si provisto> / BACKLOG (no sprint)
 Link        : "relates to" → <spike_key>
