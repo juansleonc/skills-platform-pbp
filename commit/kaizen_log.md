@@ -185,7 +185,7 @@ Integration follows pattern from `/tdd` Step 4.5 (added same day during CORE-105
 
 ## 2026-05-12 — PR Defaults (commit→PR flow)
 
-- Rule: When the commit flow chains into PR creation (`/create-pr` immediately after `/commit`), default the PR to `--assignee juansleonc --label "ready for review"` and surface both in the pre-push confirmation.
+- Rule: When the commit flow chains into PR creation (`/create-pr` immediately after `/commit`), default the PR to `--assignee <gh-user> --label "ready for review"` and surface both in the pre-push confirmation.
 - Why: Standard workflow — every PR needs an owner and a status. Omitting them forces the user to ask twice and edit the PR after creation.
 - How to apply: This skill itself does not create PRs, but when proposing the follow-up `/create-pr` step (or running it directly), include the defaults. Cross-link: `create-pr/SKILL.md` carries the primary rule.
 - Source: User correction on 2026-05-12 during TRI-74 (PR #4836). See `/Users/leon/.claude/projects/-Users-leon-workspace-pbp-platform/memory/feedback_pr_defaults.md`.

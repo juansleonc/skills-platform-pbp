@@ -29,7 +29,7 @@ Create well-formatted git commits following the project's conventional commit st
 Run `/commit` manually whenever you are about to execute `git commit`. It is a **hard gate** — do not commit without:
 1. Pronto clean on changed files (CLAUDE.local.md rule #3)
 2. Gitmoji + ticket in the commit message (CLAUDE.local.md rule #14)
-3. Explicit user `y` approval (CLAUDE.md Critical Rules)
+3. Explicit user approval (see Critical Rules above)
 
 ## Process
 
@@ -41,7 +41,7 @@ Run `/commit` manually whenever you are about to execute `git commit`. It is a *
 
 2. **If no staged changes**, show unstaged changes and ask what to stage
 
-2.5. **Run Pronto + RuboCop validation (BEFORE staging)**
+3. **Run Pronto + RuboCop validation (BEFORE staging)**
 
    **CRITICAL**: Run BOTH checks BEFORE staging files. This is a TWO-STEP verification.
 
@@ -72,12 +72,12 @@ Run `/commit` manually whenever you are about to execute `git commit`. It is a *
    - Together they catch 100% of what CI will flag
    - Pre-commit hook has known issues (`2>/dev/null` swallows errors)
 
-3. **Analyze changes** to determine:
+4. **Analyze changes** to determine:
    - Type: feat, fix, refactor, test, docs, chore, style, perf
    - Scope: affected area (e.g., payments, reservations, graphql)
    - Breaking changes
 
-4. **Generate commit message** following format (CLAUDE.local.md rule #14):
+5. **Generate commit message** following format (CLAUDE.local.md rule #14):
    ```
    TICKET | EMOJI type(scope): description
 
@@ -86,7 +86,7 @@ Run `/commit` manually whenever you are about to execute `git commit`. It is a *
    [optional footer]
    ```
 
-5. **After commit: verify with `git show --stat HEAD`** — confirm only the intended files appear in the output. If any staged file is missing, it was silently dropped by the pre-commit hook; stage it again and create a NEW commit.
+6. **After commit: verify with `git show --stat HEAD`** — confirm only the intended files appear in the output. If any staged file is missing, it was silently dropped by the pre-commit hook; stage it again and create a NEW commit.
 
 ## Commit Types
 
@@ -152,7 +152,8 @@ To add a new entry: append to `kaizen_log.md` and, if the lesson changes active 
 | 2026-02-09 | Dual lint check: Pronto (diff) + RuboCop (full file), both required |
 | 2026-02-18 | Wrapped bare `bundle exec` with `bin/d` (Docker compliance) |
 | 2026-02-19 | Added Step 5 — verify committed files with `git show --stat HEAD` |
-| 2026-05-12 | PR defaults note: `/create-pr` should include `--assignee juansleonc --label "ready for review"` |
+| 2026-05-12 | PR defaults note: `/create-pr` should include `--assignee <gh-user> --label "ready for review"` |
 | 2026-06-10 | Promoted Step 5 to body; removed stale auto-invoke parenthetical |
 | 2026-06-10 | Added gitmoji + "When to Use" section (QA audit fix) |
 | 2026-06-14 | Fixed dead `memory/` path → absolute canonical path; archived Kaizen log to `kaizen_log.md` |
+| 2026-06-14 | Renumbered steps 1–2–2.5–3–4–5 → 1–2–3–4–5–6 (sequential); collapsed redundant approval mention in "When to Use" to reference Critical Rules |
