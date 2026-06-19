@@ -115,26 +115,42 @@ end
 **Problem**: Tests can fail if Redis contains stale data from previous tests.
 
 ```ruby
-# ✅ GOOD - Clear Redis before each test
+# ✅ GOOD - Clear Rails cache before each test
 before do
-  Redis.current.flushdb
-  # Or for specific namespace:
   Rails.cache.clear
 end
 
-# ✅ GOOD - Clear specific keys only
+# ✅ GOOD - Delete specific cache keys only
 before do
-  Redis.current.del("rate_limit:user:#{user.id}")
-  Redis.current.del("cache:facility:#{facility.id}")
+  Rails.cache.delete("rate_limit:user:#{user.id}")
+  Rails.cache.delete("cache:facility:#{facility.id}")
 end
 ```
 
 ### Pattern 7: Rate Limiting Tests
 
+**Note**: `Rack::Attack.enabled` is set to `false` in test by default (`config/initializers/rack_attack.rb`). Specs that actually exercise throttle rules must explicitly enable it and reset all stores. Rack::Attack throttle counters live in a **separate** Redis connection (`RackAttackRedis.connection`, a different DB than Rails cache) — `Rails.cache.clear` alone does NOT reset them.
+
 ```ruby
 describe 'rate limiting' do
-  before do
-    Redis.current.flushdb  # CRITICAL: Clear rate limit counters
+  around(:each) do |example|
+    # Swap to an isolated in-process store so tests don't pollute the shared Redis DB
+    original_store = Rack::Attack.cache.store
+    Rack::Attack.cache.store = ActiveSupport::Cache::MemoryStore.new
+
+    # Reset all throttle state and enable Rack::Attack for this test
+    Rack::Attack.reset!
+    Rack::Attack.cache.store.clear if Rack::Attack.cache.store.respond_to?(:clear)
+    RackAttackRedis.connection.clear  # Separate Redis DB for Rack::Attack counters
+    Rails.cache.clear
+    Rack::Attack.enabled = true
+
+    example.run
+  ensure
+    RackAttackRedis.connection.clear
+    Rails.cache.clear
+    Rack::Attack.enabled = false
+    Rack::Attack.cache.store = original_store
   end
 
   it 'blocks after 5 requests' do
@@ -371,9 +387,8 @@ expect { user.profile.bio }.to raise_error(NoMethodError)
 
 ```ruby
 after do
-  Timecop.return           # Always return from frozen time
-  Redis.current.flushdb    # Clear Redis if used
-  Rails.cache.clear        # Clear cache if used
+  Timecop.return            # Always return from frozen time
+  Rails.cache.clear         # Clear Rails cache if used
   Sidekiq::Worker.clear_all # Clear job queue if used
 end
 ```

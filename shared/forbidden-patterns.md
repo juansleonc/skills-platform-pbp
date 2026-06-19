@@ -146,37 +146,43 @@ Time.zone.parse(str)
 
 ---
 
-### 5. .to_s(:format) (Ruby 3 Deprecated)
+### 5. .to_s(:format) (Rails 7.0 Deprecated / Rails 7.1 Removed)
 
-**Status**: ❌ FORBIDDEN (Ruby 3)
+**Status**: ❌ FORBIDDEN (ActiveSupport deprecation — deprecated Rails 7.0, removed Rails 7.1)
 
 ```ruby
-# ❌ FORBIDDEN - Deprecated in Ruby 3, will be removed
+# ❌ FORBIDDEN - ActiveSupport extension removed in Rails 7.1; breaks on upgrade from 6.1→7.2
 date.to_s(:db)              # "2024-01-15"
 time.to_s(:db)              # "2024-01-15 10:30:00"
 time.to_s(:short)           # "15 Jan 10:30"
 time.to_s(:long)            # "January 15, 2024 10:30"
 
-# ✅ CORRECT - Use strftime
+# ✅ CORRECT (Rails 6.1, safe today) - Use strftime
 date.strftime('%Y-%m-%d')                # "2024-01-15"
 time.strftime('%Y-%m-%d %H:%M:%S')       # "2024-01-15 10:30:00"
 time.strftime('%d %b %H:%M')             # "15 Jan 10:30"
 time.strftime('%B %d, %Y %H:%M')         # "January 15, 2024 10:30"
+
+# ✅ ALSO CORRECT (Rails 7.0+ only) - to_fs is the direct ActiveSupport alias replacement
+# ⚠️  NOT available on Rails 6.1 — use strftime for code that must run on 6.1
+date.to_fs(:db)              # Rails 7.0+ only
+time.to_fs(:db)              # Rails 7.0+ only
 ```
 
 **Common Replacements**:
 
-| Old Format | strftime Equivalent |
-|------------|---------------------|
-| `:db` | `'%Y-%m-%d'` (date) / `'%Y-%m-%d %H:%M:%S'` (datetime) |
-| `:short` | `'%d %b %H:%M'` |
-| `:long` | `'%B %d, %Y %H:%M'` |
-| `:iso8601` | Use `.iso8601` method instead |
+| Old Format | strftime Equivalent (Rails 6.1 safe) | Rails 7.0+ alias |
+|------------|--------------------------------------|------------------|
+| `:db` | `'%Y-%m-%d'` (date) / `'%Y-%m-%d %H:%M:%S'` (datetime) | `to_fs(:db)` |
+| `:short` | `'%d %b %H:%M'` | `to_fs(:short)` |
+| `:long` | `'%B %d, %Y %H:%M'` | `to_fs(:long)` |
+| `:iso8601` | Use `.iso8601` method instead | `to_fs(:iso8601)` |
 
 **Why forbidden**:
-- Deprecated in Ruby 3.x
-- Will be removed in future Ruby versions
-- Migration path: replace before upgrading to Ruby 3.2+
+- This is an **ActiveSupport (Rails) deprecation** — NOT a Ruby deprecation
+- `to_s(:format)` was deprecated in Rails 7.0 and **removed in Rails 7.1**
+- This repo is on Rails 6.1 migrating to 7.2 — code using `.to_s(:db)` will **break on upgrade**
+- Use `strftime` (works on all Rails versions); use `to_fs` only in code that won't run on 6.1
 
 ---
 
@@ -399,7 +405,7 @@ Skills that check for these patterns:
 | Hardcoded IDs | ❌ FORBIDDEN | Parallel test failures | /tdd, /coverage |
 | before(:all) with create | ❌ FORBIDDEN | Flaky tests | /tdd |
 | Time.now | ❌ FORBIDDEN | Timezone bugs | /timezone, /tdd |
-| .to_s(:db) | ❌ FORBIDDEN | Ruby 3 deprecation | /timezone |
+| .to_s(:db) | ❌ FORBIDDEN | Rails 7.0 deprecated / Rails 7.1 removed (ActiveSupport, not Ruby) | /timezone |
 | Logging sensitive data | ❌ FORBIDDEN | PCI-DSS violation | /security, /pci-compliance |
 | Hardcoded credentials | ❌ FORBIDDEN | Security breach | /security |
 | SQL injection | ❌ FORBIDDEN | Security breach | /security |

@@ -25,22 +25,27 @@ pbp_productionDB_optimized
 
 ### 1. Check for Unencrypted Sensitive Data
 
-**Purpose**: Verify webhooks use `attr_encrypted` for auth tokens
+**Purpose**: Verify webhooks use `attr_encrypted` for auth tokens (column is `encrypted_auth_token`, never a plaintext `auth_token`)
 
 ```sql
+-- NOTE: webhooks_urls has NO plaintext auth_token or name column.
+-- Real sensitive columns: encrypted_auth_token, encrypted_username, encrypted_password, encrypted_webhook_secret.
+-- This query checks that the encrypted column is populated (not null) where auth_type implies a token.
 SELECT
   id,
-  name,
+  uuid,
+  url,
+  auth_type,
   CASE
-    WHEN auth_token IS NOT NULL AND auth_token != '' THEN 'UNENCRYPTED!'
-    ELSE 'OK'
-  END as status
+    WHEN encrypted_auth_token IS NOT NULL THEN 'ENCRYPTED (OK)'
+    ELSE 'MISSING TOKEN'
+  END as token_status
 FROM pbp_productionDB_optimized.webhooks_urls
-WHERE auth_token IS NOT NULL AND auth_token != ''
+WHERE auth_type != 0  -- 0 = no auth; non-zero means a credential is expected
 LIMIT 10;
 ```
 
-**Expected**: 0 rows (all tokens should be encrypted)
+**Expected**: All rows show `ENCRYPTED (OK)` — no plaintext auth_token column exists; presence of `encrypted_auth_token` proves `attr_encrypted` is in use
 
 ---
 
@@ -139,23 +144,60 @@ LIMIT 20;
 
 **Purpose**: Ensure webhooks don't cross facility group boundaries
 
+**NOTE**: `webhooks_urls` has NO `name`, `facility_id`, or `target_facility_id` columns.
+Real columns: `id`, `uuid`, `url`, `facility_group_id`, `auth_type`, `enabled`.
+Scoping is via `facility_group_id` on the webhook itself, not a per-facility join.
+
 ```sql
+-- Check for webhooks that have a facility_group_id set (group-scoped) vs ungrouped (NULL)
 SELECT
   w.id as webhook_id,
-  w.name as webhook_name,
-  f1.id as source_facility,
-  f1.franchise_id as source_group,
-  f2.id as target_facility,
-  f2.franchise_id as target_group
+  w.uuid as webhook_uuid,
+  w.url as webhook_url,
+  w.facility_group_id,
+  CASE
+    WHEN w.facility_group_id IS NULL THEN 'UNGROUPED'
+    ELSE 'GROUP-SCOPED'
+  END as scope_type,
+  w.enabled
 FROM pbp_productionDB_optimized.webhooks_urls w
-JOIN pbp_productionDB_optimized.facilities f1 ON w.facility_id = f1.id
-LEFT JOIN pbp_productionDB_optimized.facilities f2 ON w.target_facility_id = f2.id
-WHERE f1.franchise_id != f2.franchise_id
-  AND f2.franchise_id IS NOT NULL
+ORDER BY w.facility_group_id IS NULL DESC, w.id
 LIMIT 20;
 ```
 
-**Expected**: 0 rows (no cross-group webhooks)
+**Expected**: Each webhook is either ungrouped (NULL) or tied to exactly one facility_group_id — no duplicate ungrouped entries for the same group
+
+---
+
+### 7b. Reservation Distribution (schema-aware — `reservations` has NO `facility_id`)
+
+**Purpose**: `reservations` is scoped via `court_id`, not a direct column. Distribution must JOIN through `courts`.
+
+```sql
+SELECT c.facility_id, count(*) as record_count
+FROM pbp_productionDB_optimized.reservations r
+JOIN pbp_productionDB_optimized.courts c ON r.court_id = c.id
+GROUP BY c.facility_id
+ORDER BY record_count DESC
+LIMIT 20;
+```
+
+**Interpretation**: 1 facility holding 90%+ → possible leak or test-data contamination.
+
+---
+
+### 7c. Parent-Child Facility Consistency
+
+**Purpose**: Find orphaned `parent_facility_id` references (parent row missing).
+
+```sql
+SELECT f.id, f.name, f.parent_facility_id, pf.name as parent_name
+FROM pbp_productionDB_optimized.facilities f
+LEFT JOIN pbp_productionDB_optimized.facilities pf ON f.parent_facility_id = pf.id
+WHERE f.parent_facility_id IS NOT NULL AND pf.id IS NULL;
+```
+
+**Expected**: 0 rows (every parent reference resolves).
 
 ---
 
@@ -446,10 +488,10 @@ ORDER BY week;
 
 ## MCP Usage
 
-**ClickHouse MCP Tool**: `mcp__clickhouse__run_select_query`
+**ClickHouse MCP Tool**: `mcp__clickhouse__run_query`
 
 ```
-mcp__clickhouse__run_select_query:
+mcp__clickhouse__run_query:
   query: "SELECT count(*) FROM pbp_productionDB_optimized.users WHERE facility_id = 123"
 ```
 
