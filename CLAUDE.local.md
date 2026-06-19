@@ -26,7 +26,7 @@ bin/d rails c                              # console
 bin/d rubocop -A app/models/user.rb        # rubocop
 bin/d pronto                               # pronto
 bin/d sh                                   # shell
-# Alternativas: make {test|console|rubocop|pronto|up|down|status|logs-f|shell}
+# Alternativas: make {test|console|migrate|web-bash|db-bash|containers-up}
 #               docker compose exec web bundle exec …   (verboso)
 ```
 
@@ -109,7 +109,7 @@ Cuando el usuario te corrige (después de output sustancial mío):
 
 **NO invocar si**: es respuesta a mi `AskUserQuestion` · confirmación corta (`ok`, `gracias`, `thanks`) · pide nueva tarea (no corrige) · ya rechazaste 3 sugerencias esta sesión.
 
-> Persiste en `memory/feedback_<slug>.md` + propaga a skills vía Kaizen. Detalle: `.claude/skills/learning/skill.md`.
+> Persiste en `memory/feedback_<slug>.md` + propaga a skills vía Kaizen. Detalle: `.claude/skills/learning/SKILL.md`.
 
 ### 16. Branch Safety — NUNCA tocar branches protegidas directamente
 
@@ -130,6 +130,20 @@ Cuando el usuario te corrige (después de output sustancial mío):
 
 **Defensa en profundidad**: GitHub branch protection (server) · pre-push hook en `.git/hooks/pre-push` (client) · `push.default = simple` + `push.autoSetupRemote = false`. Si alguna falla, la regla #16 sigue obligando.
 
+### 17. Tech-Debt Tagging (Convención Personal)
+
+Marker nativo para marcar **atajos deliberados** (adoptado del spike `ponytail` 2026-06-15 — SOLO esta idea; el decision-ladder y los carve-outs "never simplify" se rechazaron por redundancia con `/tdd`, `/architect` y los Critical Rules de CLAUDE.md).
+
+Formato canónico, ligado a ticket:
+```ruby
+# DEBT(CORE-123): <qué se simplificó/omitió>. ceiling: <límite/condición donde se rompe>. upgrade: <gatillo concreto que obliga a revisitarlo>.
+```
+
+- `ceiling` y `upgrade` **OBLIGATORIOS**. Un marker sin `upgrade` trigger = máximo riesgo de rot → inválido (agregá ambos o arreglá el código en vez de taguearlo).
+- Cosechar (sin rake): `git grep -nE 'DEBT\(' -- '*.rb'`. Los que no tengan `upgrade:` son los primeros a revisitar.
+- `DEBT(...)` es la **forma fuerte** (exige ticket + ceiling + upgrade). `TODO`/`FIXME` siguen para recordatorios triviales.
+- **NUNCA** taguear como `DEBT(...)`: un bug real, un guard faltante, ni una violación de Critical Rules / forbidden-patterns (timezone, facility scoping, transacciones/idempotencia de pagos, TDD-first, no-secrets). Eso no es deuda — se arregla.
+
 ## 🔀 Auto-Invoke Table (Skill Router)
 
 > **Patrón Prowler/midudev** (JSCONF2026): las skills son **prerequisitos de conocimiento OBLIGATORIOS, no referencias opcionales.** Esta tabla vive acá (push, always-on) → se consulta en **TODA** tarea, no solo cuando corro `/orchestrate`. Es enforcement soft-pero-documentado: no es un hook duro (ver `[[feedback_no_redundant_verification_hooks]]`), pero me obliga a invocar la skill ANTES de la acción. Ver memoria `[[reference_ai_coding_multiagent_workflow]]`.
@@ -144,9 +158,11 @@ Cuando el usuario te corrige (después de output sustancial mío):
 | Feature/refactor nuevo con spec **difusa** (ya sabes el enfoque) | `/grill-me` → emitir validation contracts (aserciones testables) | Ambigüedad = 0 antes de diseñar; el contrato alimenta TDD y el validator |
 | Feature nuevo / nuevo pack / refactor mayor / nueva integración | `/architect` | Diseño y ubicación antes de codear |
 | **Cualquier cambio de comportamiento** (feature, fix, guard) | `/tdd` — test que falla PRIMERO (regla #8/#1) | TDD obligatorio, sin excepciones |
-| **Después de implementar** (toda feature/fix) — **GATE** | `adversarial-review` (o `/code-review`) verificando las aserciones del contrato | Validator independiente (patrón creator-verifier de Factory) |
+| **Después de implementar** (toda feature/fix) — **GATE** | `/adversarial-review` verificando las aserciones del contrato (complementa, no reemplaza, `/code-review`) | Validator independiente basado en razonamiento (patrón creator-verifier de Factory) — OBLIGATORIO, no opcional |
 | **Llega feedback de review** (PR humano, Bugbot, CodeRabbit, Greptile) | `/receiving-code-review` — gatear antes de implementar | Inbound: verificar real+in-scope+reproducible (confirm-loop), sin agreement performativo; bots = input de menor confianza |
 | Antes de commit — **GATE** | `bin/d bundle exec pronto ...` (regla #3) + `pbp-code-review:pre-commit` | Lint de líneas cambiadas |
+| **Crear commit** (usuario dio ok explícito) | `/commit` — gitmoji + formato TICKET\|EMOJI (regla #14) | Commit limpio; nunca co-autor AI (regla #13); nunca sin permiso (regla #7) |
+| **Crear PR** | `/create-pr` (skill personal — NUNCA `pbp-code-review:pr-create`) | PR con Background/Attention/Reference (JIRA+Honeybadger); assignee + label "ready for review"; título con gitmoji; base = develop |
 
 ### Por archivo / glob
 
@@ -158,15 +174,19 @@ Cuando el usuario te corrige (después de output sustancial mío):
 | `*membership*`, `app/services/memberships/**` | `/memberships` | Auto-renewal, prorations, cross-payer |
 | `*payment*`, `*gateway*`, `app/services/payment_service/**`, `app/adapters/**` | `/pci-compliance` + `/gateway-consistency` + `/gateway-test` (nuevo gateway) | 14 gateways, PCI, dinero (regla #3/#5); `/gateway-test` genera tests al implementar gateway nuevo |
 | `app/models/**`, `app/services/**` con queries | `/multi-tenancy` + `/performance` | facility scoping (regla #2) + N+1 |
-| `app/policies/**`, `*authorized_controller*` | `/action-policy` | Authorization parity (regla #12) |
+| `app/policies/**`, `packs/*/app/policies/**` | `/action-policy` | Authorization parity (regla #12) |
 | `packs/**` (cualquier cambio de paquete) | `/packwerk` | Boundaries + prefijo de tablas |
 | `packs/audit_logs/**`, trackers | `audit-logs` | Trackers de DynamoDB |
 | Llamadas a servicios externos / HTTP / gateways | `resilience` | Timeouts, fire-and-forget, fallos silenciosos |
 | Specs nuevos/modificados | `factory-check` | build > build_stubbed > create (regla #5) |
+| Después de escribir/modificar tests | `/coverage` | 100% patch coverage en cambios (regla #1/#4) |
+| Existe `followup-tickets-*-DRAFT.md` | `/create-tickets` | Convertir DRAFT en issues Jira, 1×1 con gate y/n |
 | Query nueva o potencialmente lenta | `/query-analyzer` | EXPLAIN + ClickHouse antes de prod |
 | `Time.now` / `Date.today` / fechas | `/timezone` | Time.current (regla #1/#7/#8 local) |
 | Fix manual de datos / SQL directo | `/safe-script` | Idempotencia + rollback (regla #12 local) |
+| Correr código/rake de otra branch · PR review aislado · agentes paralelos que mutan | `/worktrees` | Aislamiento sin tocar el checkout principal; nunca `docker compose up` desde un worktree |
 | Debug de producción / error | `/debug` + Honeybadger MCP | Root cause sistemático |
+| Ejecutar comando puntual en contenedor (one-off, fuera de `bin/d`) | `/docker-exec` | Wrapper seguro; nunca `bundle exec` directo (regla #2) |
 | `Gemfile`, `Gemfile.lock` | `/gem-hygiene` | Vulnerabilidades, gems sin uso, versiones desactualizadas |
 | Refactor estructural / god class / fat model | `/code-smells` | Smells estructurales antes de refactorizar |
 | Código auth / controllers / datos sensibles | `/security` | Brakeman/OWASP además de `/action-policy` |
