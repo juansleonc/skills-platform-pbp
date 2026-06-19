@@ -173,49 +173,13 @@ end
 
 **Optionally use code-simplifier for intelligent optimization:**
 
-> **📖 See [Code Simplifier Integration Pattern](../shared/code-simplifier-integration.md)** for complete integration guide (Tier 3: OPTIONAL).
+> **📖 See [Code Simplifier Integration Pattern](../shared/code-simplifier-integration.md)** for complete integration guide, benefits, and comparison table (Tier 3: OPTIONAL).
 
 **Ask user**: "Apply factory optimizations with code-simplifier? (y/n)"
 
-**Benefits of code-simplifier**:
-- ✅ More comprehensive (also optimizes setup, contexts, let vs let!)
-- ✅ Learns from project patterns
-- ✅ Understands code context (not just regex)
-- ✅ Handles edge cases gracefully
+**If user says YES**, dispatch via Agent tool (`subagent_type: "code-simplifier"`) with the detected opportunities from Step 3, the factory rules above, and the target `<spec_file_path>`.
 
-**If user says YES:**
-
-```
-Agent tool:
-  subagent_type: "code-simplifier"
-  prompt: |
-    Apply these factory optimizations:
-    <paste detected opportunities from Step 3>
-
-    Rules:
-    - create → build (when object not persisted)
-    - create → build_stubbed (when code needs id/persisted?)
-    - create(:facility) → create(:facility, :skip_callbacks) (saves 40+ records)
-    - Keep create ONLY for scopes, queries, DB operations
-    - Preserve all test functionality
-    - Add comments if optimization is non-obvious
-
-    File: <spec_file_path>
-```
-
-**Benefits**:
-- Smarter optimization (understands code semantics)
-- Also fixes redundant setup, contexts consolidation
-- One-step application vs manual editing
-
-**When to use code-simplifier vs FactoryChecker**:
-
-| Tool | Best For | Speed | Intelligence |
-|------|----------|-------|--------------|
-| **code-simplifier** (Step 4) | Complex specs with multiple issues | Slower (~10s) | High (AI-powered) |
-| **FactoryChecker** (Step 5) | Simple factory swaps only | Fast (~1s) | Medium (rule-based) |
-
-**If user says NO**, skip to Step 5 for manual or FactoryChecker-based fixes.
+**If user says NO**, skip to Step 5 for FactoryChecker-based fixes.
 
 ### Step 5: Apply Fixes with FactoryChecker
 
@@ -337,68 +301,11 @@ Run with auto_apply: true to apply safe fixes automatically.
 
 ## Metrics
 
-Track performance improvements:
-
-```bash
-# Before optimization
-$ time bin/d rspec spec/models/
-real    2m30s
-
-# After factory-check optimization
-$ time bin/d rspec spec/models/
-real    1m45s
-
-# Result: 45 seconds saved (30% improvement)
-```
-
-## Report Format
-
-```markdown
-## Factory Optimization Report
-
-### Files Analyzed: 3
-- spec/models/user_spec.rb
-- spec/models/facility_spec.rb
-- spec/services/payment_service_spec.rb
-
-### Performance Impact
-- create() calls optimized: 24
-- Time saved per run: ~1.8 seconds
-- Full suite impact: ~30 minutes
-- CI cost savings: ~$150/month
-
-### High-Impact Changes
-1. facility_spec.rb:12 - Add :skip_callbacks (saves 300ms)
-2. user_spec.rb:45 - Use build instead of create (saves 80ms)
-3. payment_service_spec.rb:67 - Use build_stubbed (saves 70ms)
-
-### Auto-Applied: 18 changes
-### Manual Review Needed: 6 changes
-
-### Next Steps
-1. Run specs to verify changes
-2. Check coverage maintained
-3. Commit optimized specs
-```
+After Step 6, verify with `time bin/d rspec <path>` — expect 30-50% runtime reduction on optimized files. The `FactoryChecker.analyze` output (see Example Run above) is the canonical report format; multi-file runs emit one report block per file.
 
 ## Implementation Notes
 
-The `/factory-check` skill uses a Ruby helper script at `lib/factory_checker.rb`:
-
-```ruby
-# lib/factory_checker.rb
-class FactoryChecker
-  def self.analyze(file_path)
-    # AST parsing + pattern detection
-  end
-
-  def self.fix(file_path, auto_apply: false)
-    # Apply safe optimizations
-  end
-end
-```
-
-Create this helper file when first using the skill.
+Helper implemented in `lib/factory_checker.rb` (`FactoryChecker.analyze` / `.fix`). The file exists and is fully functional — no setup needed.
 
 ---
 

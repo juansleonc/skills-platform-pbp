@@ -54,3 +54,24 @@ frontmatter (`[Bash, Read, Grep, Glob, Agent, Edit]`). `Task` was never added an
 
 **Action taken:** Corrected the claim in the archived entry above (Task → Agent) and replaced the
 inline Kaizen block in SKILL.md with a pointer to this log file.
+
+---
+
+<!-- Kaizen: 2026-06-15 - optimize-skill correctness + densify pass -->
+## 2026-06-15 — Correctness fix + densify (optimize-skill pass)
+
+**What Changed:**
+- Replaced stale Implementation Notes stub (16 lines with placeholder class + "Create this helper file" instruction) with a 1-line verified pointer to `lib/factory_checker.rb`. File exists (9461 bytes, 14 methods) and is fully functional — no setup needed.
+- Collapsed Step 4 (code-simplifier) from 40 lines re-listing benefits into a 4-line trigger that delegates to `code-simplifier-integration.md` (the single source of truth).
+- Consolidated "Metrics" + "Report Format" sections (30 lines, near-duplicate of Example Run) into a 1-line note pointing back to the Example Run.
+
+**Why:**
+- `lib/factory_checker.rb` already existed and was fully implemented; the old "Create this file" instruction was misleading and could cause confusion.
+- Step 4's benefit list was duplicating `code-simplifier-integration.md` (drifted copy risk).
+- The Report Format block was a slightly-different-file-count clone of Example Run; maintaining two was wasteful.
+
+**Impact:**
+- Body: 410 → 318 lines (~22% smaller, no capability lost).
+- All decision logic (CRITICAL RULES, Quick Decision Tree, Detection Patterns, Auto-Fix Safety) preserved in body.
+- All worked examples (Patterns 1-5) preserved in body (body still under 500-line ceiling; relocation deferred per plan).
+- Frontmatter and all 4 shared references verified intact.
