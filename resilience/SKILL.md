@@ -32,6 +32,7 @@ Validates that external service calls, HTTP requests, and background jobs handle
 3. **Never use bare rescue** — always rescue specific exceptions
 4. **Never swallow errors silently** — log, notify, or re-raise
 5. **Payment operations MUST be idempotent** — retries are inevitable with 14 gateways
+6. **Every NEW failure/degraded path must be observable** — a new rescue branch, error early-return, or graceful fallback must emit a diagnosable signal (Honeybadger/Sentry `notify`, a metric, or a structured log with context). Handling a failure ≠ hiding it: if it can't be seen in prod, it can't be debugged.
 
 ## Quick Validation Commands
 
@@ -76,143 +77,18 @@ grep -rn "HTTParty\.\|Faraday\.\|RestClient\." app/controllers/ app/models/ --in
 ```
 **Expected**: External calls in controllers/models should be in background jobs or have rescue blocks
 
+```bash
+# 7. New failure/degraded paths without an observable signal - HIGH RISK
+# Scan diff for new rescue blocks, error early-returns, and fallback branches
+git diff develop -- '*.rb' | grep -E "^\+" | grep -E "rescue |rescue$|\|\| return|\|\| next|return (false|nil) (if|unless)" | grep -v "^+++"
+# For each match, confirm a diagnosable signal is present nearby (Honeybadger.notify / Sentry / Rails.logger.error / metric increment)
+git diff develop -- '*.rb' | grep -E "^\+" | grep -E "Honeybadger\.notify|Sentry\.capture|Rails\.logger\.(error|warn)|ErrorService"
+```
+**Expected**: Every new rescue branch or graceful-degradation path in the diff has a corresponding notify/log line. Silent graceful-degradation (handled but unlogged) is invisible failure — it degrades the system without leaving any trace to debug from prod.
+
 ## Detailed Patterns
 
-### Pattern 1: HTTP Calls Must Have Timeouts and Error Handling
-
-```ruby
-# ❌ BAD - No timeout, no error handling (fire-and-forget)
-def sync_data
-  response = HTTParty.post("https://api.external.com/sync", body: data.to_json)
-  process_response(response)
-end
-
-# ❌ BAD - Has rescue but swallows error silently
-def sync_data
-  HTTParty.post("https://api.external.com/sync", body: data.to_json)
-rescue StandardError
-  nil  # Silent failure — nobody knows it failed
-end
-
-# ✅ GOOD - Timeout + specific rescue + logging + notification
-def sync_data
-  response = HTTParty.post(
-    "https://api.external.com/sync",
-    body: data.to_json,
-    headers: { 'Content-Type' => 'application/json' },
-    timeout: 10  # 10 second timeout
-  )
-
-  unless response.success?
-    Rails.logger.error("Sync failed: #{response.code} - #{response.body}")
-    return false
-  end
-
-  process_response(response)
-rescue Net::OpenTimeout, Net::ReadTimeout => e
-  Rails.logger.error("Sync timeout: #{e.message}")
-  Honeybadger.notify(e, context: { url: url })
-  false
-rescue StandardError => e
-  Rails.logger.error("Sync error: #{e.message}")
-  Honeybadger.notify(e)
-  false
-end
-```
-
-### Pattern 2: Payment Gateway Resilience (PBP-Specific)
-
-With 14 payment gateways, each can fail differently:
-
-```ruby
-# ❌ BAD - Generic rescue for payment operations
-def charge(amount)
-  gateway.charge(amount)
-rescue => e
-  # Which gateway? What kind of error? Was the charge applied?
-  nil
-end
-
-# ✅ GOOD - Gateway-specific error handling with idempotency
-def charge(amount)
-  return if already_charged?(idempotency_key)
-
-  result = gateway.charge(amount, idempotency_key: idempotency_key)
-  record_charge(result)
-  result
-rescue gateway_timeout_error => e
-  Rails.logger.error("Gateway timeout: #{gateway_name} - #{e.message}")
-  Honeybadger.notify(e, context: { gateway: gateway_name, amount: amount })
-  # DON'T retry automatically — charge may have gone through
-  PaymentReconciliationJob.perform_in(5.minutes, { payment_id: payment.id })
-  false
-rescue gateway_declined_error => e
-  record_decline(e)
-  false
-end
-```
-
-### Pattern 3: .save Without Checking Return Value
-
-```ruby
-# ❌ BAD - .save returns false on failure, but nobody checks
-def update_membership
-  membership.status = 'active'
-  membership.save  # Silently fails if validation fails
-end
-
-# ✅ GOOD - Use bang or check return value
-def update_membership
-  membership.status = 'active'
-  membership.save!  # Raises on failure
-end
-
-# ✅ ALSO GOOD - Check return value
-def update_membership
-  membership.status = 'active'
-  unless membership.save
-    Rails.logger.error("Failed to activate: #{membership.errors.full_messages}")
-    return false
-  end
-  true
-end
-```
-
-### Pattern 4: Background Job Resilience
-
-```ruby
-# ❌ BAD - Job fails silently, no retry strategy
-class SyncContactsJob < ApplicationJob
-  def perform(args)
-    args = args.deep_symbolize_keys
-    contacts = ExternalApi.fetch_contacts(args[:facility_id])
-    contacts.each { |c| Contact.create!(c) }
-  end
-end
-
-# ✅ GOOD - Error handling, retry strategy, idempotency
-class SyncContactsJob < ApplicationJob
-  sidekiq_options retry: 3
-
-  def perform(args)
-    args = args.deep_symbolize_keys
-    facility_id = args[:facility_id]
-
-    contacts = ExternalApi.fetch_contacts(facility_id)
-    contacts.each do |c|
-      Contact.find_or_create_by!(external_id: c[:id]) do |contact|
-        contact.assign_attributes(c.slice(:name, :email))
-      end
-    end
-  rescue Net::OpenTimeout, Net::ReadTimeout => e
-    Rails.logger.error("Sync timeout for facility #{facility_id}: #{e.message}")
-    raise  # Let Sidekiq retry
-  rescue StandardError => e
-    ErrorService.new(e, context: { facility_id: facility_id }).notify
-    raise  # Let Sidekiq retry
-  end
-end
-```
+> **📖 Worked code patterns (HTTP timeout+rescue, payment-gateway resilience, .save return-value, background-job retry) → [reference/patterns.md](reference/patterns.md).**
 
 ## PBP-Specific: External Services to Audit
 
@@ -234,63 +110,27 @@ grep -rn "HTTParty\.\|Faraday\.\|Net::HTTP\.\|RestClient\." app/adapters/ app/se
 
 ## Audit Process
 
-### Step 1: Find All External Calls
-
+**Step 1 — Find all external calls:**
 ```bash
-# List all files with HTTP calls
 grep -rln "HTTParty\|Faraday\|Net::HTTP\|RestClient\|URI\.open" app/ --include="*.rb" | grep -v spec
 ```
 
-### Step 2: Validate Each External Call
+**Step 2 — Validate each file.** For every HTTP call, confirm all 5:
+1. **Timeout configured?** (`open_timeout` / `read_timeout` preferred over generic `timeout`)
+2. **Rescue block present?** (grep `rescue` in same method)
+3. **Specific exceptions rescued?** (no bare `rescue` or `rescue Exception`)
+4. **Error logged or notified?** (`Rails.logger`, `Honeybadger`, `ErrorService`)
+5. **Return value handled?** (caller checks for failure)
 
-For each file found, check:
-
-1. **Timeout configured?** — grep for `timeout` near HTTP call
-2. **Rescue block present?** — grep for `rescue` in same method
-3. **Specific exceptions rescued?** — not bare `rescue` or `rescue Exception`
-4. **Error logged or notified?** — grep for `logger`, `Honeybadger`, `ErrorService`
-5. **Return value handled?** — caller checks for failure
-
-### Step 3: Check Honeybadger for Recurring Issues
-
+**Step 3 — Check Honeybadger for recurring issues:**
 ```
 mcp__honeybadger__list_faults:
   project_id: <project_id>
   q: "timeout OR connection OR Net::OpenTimeout OR Errno::ECONNREFUSED"
 ```
 
-### Step 4: Generate Report
-
-## Report Format
-
-```markdown
-## Resilience Audit
-
-### Summary
-- External calls found: X
-- Missing timeouts: Y
-- Missing error handling: Z
-- Silent failures: W
-
-### Critical Issues (Must Fix)
-
-| File | Line | Issue | Risk |
-|------|------|-------|------|
-| patch/contacts.rb | 45 | No timeout on API call | Cascading timeout |
-| stripe_gateway.rb | 112 | Silent rescue nil | Lost payment data |
-
-### Warning Issues (Should Fix)
-
-| File | Line | Issue | Risk |
-|------|------|-------|------|
-| webhook_sender.rb | 67 | Bare rescue | Masks real errors |
-| sms_service.rb | 34 | .save without check | Silent failures |
-
-### Recommendations
-1. Add 10s timeout to all HTTParty calls in app/adapters/
-2. Replace rescue nil with proper error logging
-3. Add idempotency keys to payment retry logic
-```
+**Step 4 — Generate report:**
+> **📄 Audit report template → [reference/report-template.md](reference/report-template.md).**
 
 ---
 
