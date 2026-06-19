@@ -23,3 +23,13 @@
 - Collapsed "Proposed target architecture (NOT implemented)" 15-line section to a 2-line note (~13 lines saved).
 - Archived this Kaizen section to sibling kaizen_log.md (~12 lines saved from hot path).
 - Net: 587 → ~522 lines (−65 lines, −11%).
+
+## 2026-06-15 — Clear <500 hard ceiling via progressive disclosure (/optimize-skill)
+
+- Body was 514 lines — 14 over the repo's HARD <500 ceiling (the only hard violation; all content verified accurate).
+- Relocated the two largest verbatim blocks to a new bundled `reference/examples.md` (one level deep, TOC since >100 lines), each replaced by a one-line resolving pointer:
+  - Architecture ASCII inheritance tree (~37 lines) → densified to a 6-row capability table in body + full tree in examples.md §1.
+  - §8 Testing Patterns full code (~70 lines) → 4 bullet key-rules in body + full scaffolds in examples.md §2.
+- Net: 514 → 424 lines (−90, −17.5%); 76 lines of margin under the ceiling. Zero capability removed — OPTIMIZE ≠ DELETE.
+- Deferred (HEADLESS, user-decision): (1) stale Skill Router glob `*authorized_controller*` at `.claude/skills/CLAUDE.local.md` L161 → should become the two real `base_controller.rb` paths so /action-policy auto-fires (edits user config, not skill); (2) optional alignment of the `org_permission_resolver` ternary to the live if/else form (cosmetic, semantically equivalent).
+- Left Anti-Pattern Detection Commands + Quick Validation Workflow both intact: ceiling already cleared with margin, and the two serve distinct purposes (granular 7-grep checklist vs. single runnable spec-executing block) — removing either would lose capability.
