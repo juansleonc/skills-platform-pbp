@@ -42,3 +42,23 @@ Three confirmed findings fixed:
 1. "Integration with Orchestrator" end_of_session_hook / weekly_skill_report blocks labelled NOT IMPLEMENTED (aspirational only; orchestrate marks skill-creator manual-only).
 2. Sweep-lint sentence corrected: adversarial-review description is COMPLIANT (trigger-condition language, not workflow-summary). False claim removed.
 3. Meta-Kaizen log archived here (verbatim); SKILL.md replaced with pointer.
+
+<!-- Kaizen: 2026-06-14 — Progressive-disclosure optimization (/optimize-skill, Context7-grounded) -->
+Optimized SKILL.md 881 → 201 lines via Anthropic progressive disclosure (L2 body = decision core + ToC; detail relocated VERBATIM to reference/, every pointer one level deep). No capability lost.
+- RELOCATED to new reference/ files: scoring-algorithm.md (skill_candidate? Ruby block), pattern-types.md (5 detection types + examples), workflow-phases.md (6-phase ASCII box), templates.md (Proposal + Skill-Template + creation-log + Deferred-Backlog + Detection-Report, with ToC), aspirational-integration.md (orchestrator pseudocode), pressure-testing.md (variant table + PBP example), examples.md (Gate-1 ❌/✅ + NOT-IMPLEMENTED scenarios).
+- DENSIFIED in body: Purpose/Philosophy/Core Principles/When-to-Use/Best Practices/Success Criteria.
+- DE-DUPLICATED: dropped Config-Priority banner (duplicates CLAUDE.local.md); Metrics section → one-line pointer to existing creation_log.md.
+- Decision logic KEPT inline: Core Principles, When-to-Use, scoring thresholds, CSO/description rule (softened), Pressure-Test rule + acceptance, 7 Quality Gates, 9 rejection reasons, Success Criteria.
+- Context7-grounded CORRECTNESS fixes (not relocations):
+  1. Related-Skills `/orchestrate` row no longer claims "triggers skill-creator at session end" — now states complementary manual meta-skill, no automatic trigger (matches manual-only statements elsewhere).
+  2. Frontmatter teaching now notes Anthropic spec REQUIRES only name+description; allowed-tools optional; disable-model-invocation is a Claude-Code harness extension (still emitted — just not "universally required").
+  3. CSO rule SOFTENED to Anthropic alignment: description must state WHAT + WHEN (third person); kept the real failure-mode warning (no followable step/phase SEQUENCE in description). Checklist + ✅/❌ examples updated to match.
+  4. This skill's own description rewritten to what+when form (was trigger-only).
+- TEMPLATE aesthetic (middle ground) applied to the GENERATED template only: per-skill in-body `## Kaizen` changelog → bundled `kaizen_log.md` pointer; epigraph quote/kanji + `## Philosophy` made OPTIONAL/documented. Existing skills' aesthetics untouched.
+
+<!-- Kaizen: 2026-06-14 — Harness-extension clarification note (verification pass) -->
+Verified that the clarifying note about `disable-model-invocation` and `allowed-tools` being Claude Code harness extensions (not part of the portable Agent Skills spec) is already present in BOTH locations:
+- SKILL.md § "Frontmatter Rule" (line ~117): inline spec note in the `description:` teaching block.
+- reference/templates.md § "Skill Template Generation" (lines ~83-84): **Frontmatter spec note** bold paragraph above the YAML scaffold.
+Both notes state: spec requires only `name` + `description`; `allowed-tools` is optional; `disable-model-invocation` is a Claude-Code harness extension; keep using them in this repo but mark as Claude-Code-specific when authoring portable/published skills.
+No file changes made — note already present from 2026-06-14 optimization pass.
