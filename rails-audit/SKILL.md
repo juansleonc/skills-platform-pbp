@@ -2,7 +2,7 @@
 name: rails-audit
 description: Use when running a full-application health check or pre-release audit across security, performance, code smells, resilience, database, testing, multi-tenancy, gem hygiene, API compatibility, and timezone safety.
 allowed-tools: [Bash, Read, Grep, Glob, Edit]
-disable-model-invocation: false
+disable-model-invocation: true
 ---
 
 > **Config Priority**: `CLAUDE.local.md` overrides `CLAUDE.md` for local settings (Docker, linting, coverage). Always check both files for current project conventions.
@@ -54,7 +54,7 @@ Comprehensive Rails application audit covering 10 categories, inspired by though
 
 ### Phase 1: Fast Automated Checks (Parallel)
 
-These checks run via grep/bash and complete quickly. All commands run in Docker via `bin/d`.
+These checks run via grep/bash on the **host working tree** (no Docker needed — they are static file scans). Only Ruby/Rails commands (Phase 2 skill audits and the Pronto lint below) must run via `bin/d`.
 
 ```bash
 # === 1. SECURITY ===
