@@ -5,7 +5,7 @@ allowed-tools: [Bash, Read, Grep, Glob, Edit, mcp__clickhouse__run_query, mcp__c
 disable-model-invocation: false
 ---
 
-> **📋 Config Priority**: `CLAUDE.local.md` overrides `CLAUDE.md` for local settings (Docker, linting, coverage). Always check both files for current project conventions.
+> **Config files**: see `CLAUDE.local.md` (overrides `CLAUDE.md` for local settings). No `strong_migrations` gem in this repo — all migration safety is enforced manually via this skill and review.
 
 # Database Migration Safety Skill
 
@@ -16,7 +16,7 @@ Validates migrations for safety with **1029+ existing migrations** (935 main + 9
 1. **ALWAYS reversible** - Must have `down` method or use `change`
 2. **NEVER drop columns without backup** - Data loss is permanent
 3. **ALWAYS add indexes** for foreign keys and frequently queried columns
-4. **MySQL 8.0/InnoDB (this codebase):** `ADD INDEX` is online by default (ALGORITHM=INPLACE, LOCK=NONE) — plain `add_index` is non-blocking for reads/writes in most cases. The real locking danger is ALGORITHM=COPY operations: changing column type, charset/collation, or reordering columns on large tables. Use `pt-online-schema-change`/`gh-ost` or coordinate a maintenance window for those.
+4. **MySQL 8.0/InnoDB (this codebase):** `ADD INDEX` is online by default (ALGORITHM=INPLACE, LOCK=NONE) — plain `add_index` is non-blocking for reads/writes in most cases. The real locking danger is ALGORITHM=COPY operations: changing column type, charset/collation, or reordering columns on large tables. Use `pt-online-schema-change`/`gh-ost` or coordinate a maintenance window for those. **Never pass `algorithm: :copy` to `add_index` on MySQL** — unlike `:concurrently` (which raises ArgumentError), `:copy` is a valid MySQL option that silently forces `ALGORITHM=COPY` and blocks all writes on large tables.
 5. **ALWAYS set defaults** for NOT NULL columns
 
 ## Audit Process
@@ -68,7 +68,7 @@ grep -rn "drop_table\|remove_column\|execute" db/migrate/*.rb | grep -v "def dow
 
 ### Step 3: Check Index Safety
 
-**MySQL 8.0/InnoDB (this codebase):** `ADD INDEX` runs online by default (ALGORITHM=INPLACE, LOCK=NONE), meaning it does NOT block reads or writes for standard `add_index` calls. The PostgreSQL-specific options `algorithm: :concurrently` and `disable_ddl_transaction!` are **not valid on MySQL** — they raise `ArgumentError` and must never be used here.
+**MySQL 8.0/InnoDB (this codebase):** `ADD INDEX` runs online by default (ALGORITHM=INPLACE, LOCK=NONE), meaning it does NOT block reads or writes for standard `add_index` calls. The PostgreSQL-specific option `algorithm: :concurrently` is **not valid on MySQL** — it raises `ArgumentError` and must never be used. `disable_ddl_transaction!` is valid on MySQL and is used in this repo (see Step 6 and raw-DDL migrations), but it is NOT needed for a plain `add_index`.
 
 ```ruby
 # ✅ GOOD - Plain add_index is online/non-blocking on MySQL 8.0 InnoDB
@@ -78,10 +78,8 @@ class AddIndexToUsers < ActiveRecord::Migration[6.1]
   end
 end
 
-# ❌ BAD - PostgreSQL-only; raises ArgumentError on MySQL (mysql2 gem)
+# ❌ BAD - algorithm: :concurrently is PostgreSQL-only; raises ArgumentError on MySQL (mysql2 gem)
 class AddIndexToUsers < ActiveRecord::Migration[6.1]
-  disable_ddl_transaction!  # NO-OP at best, error at worst on MySQL
-
   def change
     add_index :users, :email, algorithm: :concurrently  # ArgumentError on MySQL!
   end
@@ -143,10 +141,18 @@ add_foreign_key :reservations, :facilities
 For tables with millions of rows:
 
 ```ruby
-# ✅ GOOD - Batched backfill
-def up
-  User.in_batches(of: 1000) do |batch|
-    batch.update_all(status: 'active')
+# ✅ GOOD - Batched backfill with disable_ddl_transaction! and sleep throttle
+class BackfillUserStatus < ActiveRecord::Migration[6.1]
+  disable_ddl_transaction!  # Prevents Rails from wrapping the ENTIRE migration in one transaction — required for batched DML backfills (avoids long-held write locks across batches), not just when mixing DDL
+
+  BATCH_SIZE = 1_000
+  SLEEP_SECONDS = 0.01  # Keeps replication lag low between batches
+
+  def up
+    User.in_batches(of: BATCH_SIZE) do |batch|
+      batch.update_all(status: 'active')
+      sleep(SLEEP_SECONDS)
+    end
   end
 end
 
@@ -155,6 +161,8 @@ def up
   User.update_all(status: 'active')  # Dangerous on large tables!
 end
 ```
+
+`disable_ddl_transaction!` is the correct pattern for **any** migration that should not be wrapped in a single transaction: batched DML backfills (avoids long-held write locks across batches), migrations that combine DDL + DML, or raw `execute` with `ALGORITHM=INPLACE`/`LOCK=NONE` (all usages exist in the repo). The `sleep` throttle prevents sustained replication lag under large backfills.
 
 ### Step 7: Verify in ClickHouse (Production Data)
 
@@ -193,7 +201,9 @@ All package tables MUST be prefixed:
 | feature_flag | `feature_flag_` |
 | game_match | `game_match_` |
 | book_a_pro | `book_a_pro_` |
-| orgs | `orgs_` |
+| orgs | `org_` |
+
+The table above is the working reference for prefix mapping (non-exhaustive). For general naming conventions see `docs/development/package-conventions.md`; neither that file nor the packwerk skill contains a per-pack prefix table, so treat this table as the primary source and update it when adding new packs.
 
 ```bash
 # Verify package table naming
@@ -284,7 +294,7 @@ end
 
 - [ ] Reversible (has down method or uses change)
 - [ ] Indexes added for foreign keys
-- [ ] MySQL 8.0/InnoDB: plain `add_index` is online — no `algorithm: :concurrently` needed (raises ArgumentError on MySQL)
+- [ ] MySQL 8.0/InnoDB: plain `add_index` is online — never use `algorithm: :concurrently` (raises ArgumentError) or `algorithm: :copy` (blocks all writes)
 - [ ] Column type/charset/collation changes on large tables use `pt-online-schema-change`/`gh-ost` or maintenance window (ALGORITHM=COPY risk)
 - [ ] NOT NULL columns have default values
 - [ ] Large table updates use batching
@@ -352,7 +362,7 @@ Users table: 2.5M rows, 1.2GB
 ✅ NOTE: Index creation on 2.5M-row table
 - MySQL 8.0/InnoDB: `add_index` runs ALGORITHM=INPLACE, LOCK=NONE by default — non-blocking for reads/writes.
 - No changes needed for index creation specifically.
-- The `algorithm: :concurrently` + `disable_ddl_transaction!` pattern is **PostgreSQL-only** and raises `ArgumentError` on this MySQL codebase — do NOT apply it.
+- `algorithm: :concurrently` is **PostgreSQL-only** and raises `ArgumentError` on this MySQL codebase — do NOT apply it.
 
 ### Verified Safe (MySQL 8.0/InnoDB)
 
