@@ -31,6 +31,20 @@ Added "Test Production Scripts Before Sending" guidance — always test scripts 
 
 ---
 
+<!-- Kaizen: 2026-06-15 — correctness fixes (optimize-skill Wave 3) -->
+- Fixed stale "if supported" hedge on `bin/d restart`: bin/d line 300 confirms the `restart)` branch exists. Updated Container Management to definitive: `bin/d restart` (restarts web container via docker compose restart).
+- Added `bin/d up` and `bin/d down` to Quick Reference table and Container Management section. Both branches verified in bin/d (lines 324, 330). The skill previously steered users to verbose `docker compose down`/`up` while omitting the bin/d shortcuts, contradicting the "bin/d is canonical" framing.
+- **RETRACTION (Fix 3 — pronto canonical form):** The "Standardized Pronto invocation" change in this entry was INCORRECT. It promoted `bin/d pronto -r rubocop -c develop -f text` as "canonical native form (preferred)" and demoted `bin/d bundle exec pronto run -r rubocop -c develop -f text` to a commented-out equivalent. This CONTRADICTS CLAUDE.local.md §3, which is the authoritative source and designates the `bin/d bundle exec pronto run -r rubocop -c develop -f text` form as PRIMARY. While `bin/d pronto ...` is a valid passthrough shorthand (bin/d lines 221-228), it must NOT be promoted above the CLAUDE.local.md §3 form. Corrected in the 2026-06-15 Correction entry below.
+
+<!-- Kaizen: 2026-06-15 — CORRECTION of Fix 3 contradiction with CLAUDE.local.md §3 -->
+- Reverted the incorrect pronto promotion from the Wave 3 entry above.
+- SKILL.md Code Quality section now shows `bin/d bundle exec pronto run -r rubocop -c develop -f text` as the PRIMARY/canonical command (labelled "authoritative per CLAUDE.local.md §3").
+- `bin/d pronto -r rubocop -c develop -f text` is mentioned only as a "shorthand alias" in a comment line below the primary.
+- Quick Reference table row updated: removed bare `bin/d pronto` entry, now shows the full canonical form with a note about the shorthand.
+- Root cause: previous worker reasoned from bin/d internals ("native form") without checking CLAUDE.local.md §3, which is the explicit override authority. CLAUDE.local.md always wins over implementation convenience on naming conventions.
+
+---
+
 <!-- Kaizen: 2026-06-14 — skills-audit fixes (Wave 2) -->
 - Replaced abbreviated `bin/d pronto` with canonical form `bin/d bundle exec pronto run -r rubocop -c develop -f text` in Code Quality section (cross-cutting finding #3).
 - Replaced self-edit-via-Edit instruction with "run /kaizen after task" (cross-cutting finding #1).

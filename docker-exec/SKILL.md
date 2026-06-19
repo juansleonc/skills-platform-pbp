@@ -51,13 +51,16 @@ docker compose exec web bundle exec rails console
 | `bin/d rails c` | Rails console |
 | `bin/d rake '<task>'` | Run rake task |
 | `bin/d rubocop -A <file>` | Lint file |
-| `bin/d pronto` | Run pronto vs develop |
+| `bin/d bundle exec pronto run -r rubocop -c develop -f text` | Run pronto (canonical per CLAUDE.local.md §3; shorthand: `bin/d pronto -r rubocop -c develop -f text`) |
 | `bin/d migrate` | Run migrations |
 | `bin/d rollback [n]` | Rollback migrations |
 | `bin/d sh` | Shell in container |
 | `bin/d coverage` | Coverage delta |
 | `bin/d coverage <file>` | Coverage for file |
 | `bin/d status` | Service health check |
+| `bin/d up` | Start all containers (detached) |
+| `bin/d down` | Stop and remove containers |
+| `bin/d restart` | Restart the web container |
 | `bin/d help` | Show all commands |
 
 ## Makefile Quick Reference
@@ -150,8 +153,10 @@ bin/d routes
 
 ```bash
 # Pronto - for MODIFIED files (only checks changed lines)
-# Canonical form (CLAUDE.local.md Rule #3) — always include -r rubocop and -f text:
+# PRIMARY form (authoritative per CLAUDE.local.md §3):
 bin/d bundle exec pronto run -r rubocop -c develop -f text
+# Shorthand alias (bin/d passes args through to `pronto run`):
+# bin/d pronto -r rubocop -c develop -f text
 # Note: make pronto does NOT exist in Makefile — use bin/d
 
 # RuboCop - ONLY for NEW files
@@ -199,18 +204,24 @@ make db-bash                # Real Makefile target (opens bash in DB container)
 ## Container Management
 
 ```bash
-# Start all containers (real Makefile targets)
-make containers-up          # Start all containers
+# Start all containers
+bin/d up                    # Start all containers (detached) — bin/d native
+make containers-up          # Real Makefile target (same effect)
 make web-start              # Start and attach to web container
+# Note: make up does NOT exist in Makefile — use bin/d up
 
 # Stop containers
-# Note: make down does NOT exist — use: docker compose down
+bin/d down                  # Stop and remove containers — bin/d native
+# Note: make down does NOT exist in Makefile — use bin/d down
 
 # Restart web container
-# Note: make restart does NOT exist — use: bin/d restart (if supported by bin/d)
+bin/d restart               # Restart the web container (docker compose restart web)
+# Note: make restart does NOT exist in Makefile — use bin/d restart
 
-# Restart Puma (faster than container restart)
-# Note: make touch does NOT exist — use: touch tmp/restart.txt  (from host) or bin/d sh + touch
+# Restart Puma (faster than container restart — no docker stop/start)
+touch tmp/restart.txt       # From host: signal Puma to reload
+# Or: bin/d sh then touch tmp/restart.txt inside container
+# Note: make touch does NOT exist — use touch tmp/restart.txt directly
 
 # Check service health
 bin/d status
