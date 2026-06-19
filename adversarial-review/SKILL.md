@@ -31,7 +31,7 @@ Any finding failing any of the three → demote to a NOTES section labeled `pre-
 ## Launching the agents
 
 - Launch each agent with `subagent_type: "Explore"` — read-only (no Edit/Write/NotebookEdit), which is what a review must be. Explore can still run `git diff`, grep for sibling write paths, read files, and run ClickHouse read queries. Note on subagent_type: when the orchestrator dispatches the adversarial-review session as a whole, it uses `subagent_type: "validator"` (Gate 3.5 in the orchestrate Phase table). These are consistent — the session is a validator; each internal reasoning lens it spawns is an Explore (read-only). A reader of both skills should expect this: "validator" describes the session's role in the pipeline, "Explore" describes the individual lens agents within that session.
-- Pass `model: "fable"` explicitly on EVERY lens dispatch. The lenses do reasoning-based failure construction — the highest-leverage model spend in the pipeline — and without the override they inherit the session model (a sonnet session would silently run the lenses degraded). This is deliberate asymmetry with the cheap pattern-scan analysts (`/timezone`, `/packwerk` → sonnet): the model follows the task nature, not the agent type.
+- Pass `model: "opus"` explicitly on EVERY lens dispatch. The lenses do reasoning-based failure construction — the highest-leverage model spend in the pipeline — and without the override they inherit the session model (a sonnet session would silently run the lenses degraded). This is deliberate asymmetry with the cheap pattern-scan analysts (`/timezone`, `/packwerk` → sonnet): the model follows the task nature, not the agent type.
 - **Feed each lens RAW EVIDENCE, not your distilled summary.** Pass the original inputs (raw diff, raw research reports, raw files) alongside the attack framing. Seeing the conclusion you reached is fine — creator-verifier design plus adversarial framing neutralizes anchoring on the thesis. The bias that leaks is SHARED-PREMISE: a lens that sees only your summary inherits your reading of the facts and can contest only your thesis, not the facts themselves. Invariant/fact-checker lenses → pass explicit claims against objective ground truth. Inverter/reasoning lenses → conclusion + attack framing + raw inputs. For a load-bearing decision, add a BLIND independent pass (a fresh lens concludes from raw inputs without seeing yours) and then reconcile.
 - Give each agent a focused, single-responsibility role (its section below is the prompt). Paste the Step 0.1 diff stat + the relevant diff into each prompt template where it says `[PASTE DIFF OR CONTEXT HERE]`.
 - The agents run independently and report back; you (the orchestrator) aggregate. They do not talk to each other. If a future review genuinely needs agents to challenge each other's findings or share state, *agent teams* are the documented next step — not needed here; independent agents + aggregation is simpler and sufficient.
@@ -244,12 +244,9 @@ After all agents complete (the three core agents, plus Agent 4 when Step 0.2 tri
 3. **What was ruled out and WHY**: For each concern investigated and dismissed, state the specific mechanism that prevents it
 4. **What remains uncertain**: Declare what is unknown. Uncertainty is the output, not a failure of the process
 5. **Verdict**: APPROVE / APPROVE WITH NOTES / REQUEST CHANGES — with one-line rationale
-6. **Confirm-Loop Gate** — iterate to resolution as a GATED loop, never blind:
-   1. Gate each finding before acting: real + in-scope (`git diff develop...HEAD`) + reproducible; discard theoretical/out-of-scope.
-   2. Confirm by finding type — code/logic → reproduce LOCALLY with a failing test; API/lib usage → Context7 (negative result = low-confidence); prod-state/scale → ClickHouse (apply `FINAL` on ReplacingMergeTree + mind replica lag) or Honeybadger. MCP = MANUAL corroboration aids, never automated oracles. ≥2 independent sources on load-bearing claims.
-   3. Document each CONFIRMED case in `investigations/<ticket>/findings.md` (gitignored).
-   4. Terminate on 2 consecutive clean passes or a hard cap — not infinite.
-   5. Autonomy ends at the action gate: auto up to confirmed+documented+fix-proposed; commit/push/destructive/outward stay manually approved.
+6. **Confirm-Loop Gate** — gate each finding I generated here (real + in-scope + reproducible), confirm by type, and terminate on 2 clean passes, never blind.
+   > Confirm-loop gate: see [.claude/skills/shared/confirm-loop-gate.md](../shared/confirm-loop-gate.md) for the full 5-step loop.
+   > Skill-specific: these are findings **I generated** (my three lenses, plus Agent 4). Run the Step 0.3 filter as the first pass of the gate, then route each surviving finding through the shared loop before it enters the verdict.
 
 ---
 
@@ -271,7 +268,7 @@ After all agents complete (the three core agents, plus Agent 4 when Step 0.2 tri
 
 <!-- Kaizen: 2026-06-09 --> Promoted to Aggregation section ("don't trust the report" — read diff line-by-line, confirm each claim independently) — see body. Source: obra/superpowers MIT.
 
-<!-- Kaizen: 2026-06-10 --> Promoted to "Launching the agents" (explicit model pin on every lens; model follows task nature, not subagent_type) — see body. Model updated opus→fable per skills audit 2026-06-13.
+<!-- Kaizen: 2026-06-10 --> Promoted to "Launching the agents" (explicit model pin on every lens; model follows task nature, not subagent_type) — see body. Model updated opus→fable per skills audit 2026-06-13. ⚠️ REVERTED 2026-06-19: lens model pin is back to `opus` — Fable 5 hit intermittent unavailability ("Claude Fable 5 is currently unavailable") and hard-failed a live validator dispatch; opus gives equivalent reasoning-heavy quality with reliable availability.
 
 <!-- Kaizen: 2026-06-10 — Conservative Kaizen dedup pass (Fable audit Tier 3) -->
 - Compressed 7 of 9 Kaizen entries whose rule text was promoted verbatim (or near-verbatim) into the Workflow/Step 0 and Agent body sections. Kept intact: 2026-06-05 "feed raw evidence not summary" and 2026-06-05 "confirm-loop on findings" — neither has a dedicated body section; rule text is unique to this log.
