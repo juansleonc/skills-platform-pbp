@@ -1,5 +1,68 @@
 # Kaizen Improvement Log
 
+## 2026-06-15 - kaizen (progressive-disclosure relocation to clear <500 ceiling)
+
+### Context
+- **Trigger**: `kaizen/SKILL.md` body was 616 lines — OVER the repo's `<500` hard ceiling (`optimize-skill/SKILL.md` line 23).
+- **Target**: kaizen skill itself (616 → 241 lines body).
+- **Constraint**: OPTIMIZE ≠ DELETE — content relocated verbatim into bundled files with body pointers (Anthropic progressive disclosure, references one level deep). No capability removed.
+
+### Changes Made
+- **Relocated** (verbatim → bundled file + body pointer):
+  - 6-phase Kaizen-cycle ASCII box → `reference/kaizen-cycle.md` (body keeps the OBSERVE→…→REFLECT one-liner + pointer).
+  - Improvement Categories (5) + Patterns (5) + "Common Improvements (Quick Patterns)" → `reference/improvement-catalog.md` (body keeps category/pattern names + match-defect-to-category logic).
+  - ROI tables + Priority Matrix + Ecosystem Formula + Output Format + Kaizen Log Format → `reference/roi-and-reporting.md` (body keeps the one-line ROI gist + pointer).
+  - "Validation Commands" (4 subsection scripts) → `scripts/validate_skill.sh` (shebang + `set -euo pipefail`; `read -r`, quoted subshells, `|| true` on greps so `set -e` doesn't abort on no-match). Body keeps a one-line invocation pointer.
+- **Kept in body** (decision cores, per spec): When-to-Use / manual-only framing · Audit Checklist priorities · Behavior-Test Eval (RED/GREEN/pressure + Prune Counterpart) · four-mode Workflows table · ROI gist.
+- **Added** (TASK 2): frontmatter-portability note under the Audit Checklist Critical Priority block — `disable-model-invocation` + `allowed-tools` are Claude Code harness extensions; portable Agent Skills spec needs only `name` + `description` (+ optional `license`/`metadata`/`compatibility`); don't flag them as non-compliant in THIS repo, but flag as Claude-Code-specific when auditing portable/published skills.
+
+### Impact
+- Body line count: 616 → 241 (-61%); now under the `<500` hard ceiling with headroom.
+- 4 bundled files created; all 4 body pointers resolve one level deep; `bash -n` passes on the script.
+- Decision logic intact (cycle summary, audit checklist, behavior-test eval, workflows table, ROI gist all remain in body).
+
+### Lessons Learned
+- The `<500` hard ceiling lives in `optimize-skill/SKILL.md`, not in each skill's body — wording left untouched there.
+- Pattern-3's old in-body cross-ref ("Validation Commands → Check for Outdated Patterns") had to be repointed to `scripts/validate_skill.sh` once the Validation Commands block became a script — relocations must fix inbound cross-refs, not just move text.
+
+## 2026-06-14 - kaizen (self-audit via /optimize-skill)
+
+### Context
+- **Trigger**: `/optimize-skill` headless worker pass on `kaizen/SKILL.md`
+- **Target**: kaizen skill itself (654 → 616 lines)
+
+### Issues Found
+| # | Issue | Type | ROI |
+|---|-------|------|-----|
+| 1 | **Broken validation script** (Validate Shared References): grep matched single-level `](../shared/` but sed stripped TWO-level `](../../shared/` (four dots). Repo uses single-level only (80 refs, 0 double-level) → sed never stripped, paths never resolved, "Expected: No output" claim was false. | Validation | 3.0 |
+| 2 | Pattern-3 grep block duplicated the canonical "Check for Outdated Patterns" block; forbidden-pattern list duplicated `../shared/forbidden-patterns.md`. | Maintainability | 2.0 |
+| 3 | "Config Priority" banner restated CLAUDE.local.md verbatim. | Maintainability | 2.0 |
+| 4 | Purpose/Philosophy/Core-Principles/Success-Criteria/Remember/Meta-Kaizen carried duplicated motivational quotes + "Claude already knows" rationale. | Clarity | 1.5 |
+
+### Changes Made
+```diff
+- ref=$(echo "$line" | sed 's/.*](\.\.\/\.\.\/shared\///' ...)   # 4 dots, never matched
++ ref=$(echo "$line" | sed 's/.*](\.\.\/shared\///' ...)         # 2 dots, matches repo convention
+```
+- Pattern-3 now points to the single canonical grep block (links `../shared/forbidden-patterns.md`).
+- Config Priority banner → one-line pointer to single source of truth.
+- Collapsed Purpose/Philosophy/Core Principles → one dense "Purpose & Principles" block; trimmed Success Criteria + Remember/Meta-Kaizen duplication.
+
+### Verification
+- Fixed script run against the tree → all real `../shared/` refs resolve (only self-match false positive from the script documenting its own grep pattern).
+- Frontmatter intact; all `../shared/` refs one-level-deep + resolving; body 654 → 616.
+
+### Deferred (USER-DECISION — not applied headless)
+1. Relocate ~350 lines of reference content → bundled `reference/kaizen-cycle.md`, `reference/improvement-catalog.md`, `reference/roi-and-reporting.md` + `scripts/validate_skill.sh` (gets body <500, fixes audits-others-for-length credibility gap). Structural surface change → needs review.
+2. Reframe `disable-model-invocation` as a harness-only extension (NOT spec-canonical per Context7 quick_validate allow-list {name, description, license, allowed-tools, metadata, compatibility}) in the audit checklist + YAML-validation guidance. Changes what kaizen TEACHES other skills.
+3. Soften "<500 lines HARD CEILING" → "guidance + >300-line → add TOC" per Context7 docs. Affects how kaizen judges every audited skill.
+
+### Lessons Learned
+- A "validation" snippet that scans for breakage can itself be silently broken — the sed/grep level mismatch meant it never tested what its prose claimed. Always run a self-audit skill's own validators against the live tree.
+- A length-auditing skill that exceeds its own ceiling has a credibility gap; relocate before lecturing.
+
+---
+
 ## 2026-03-05 - CORE-256 PR Feedback (architect, MEMORY)
 
 ### Context
