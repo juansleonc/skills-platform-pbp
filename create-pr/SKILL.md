@@ -54,25 +54,24 @@ Use the project's `PULL_REQUEST_TEMPLATE.md` format. Include only relevant secti
 
 **Attention**
 
-* Feature can be deployed anytime / Feature needs communication before merging
-* No blocking migrations / Includes migration (create/drop table)
-* New rule `specific_rule` to enable X (if applicable)
-* Worker/rake task notes (if applicable)
+* Feature needs to be communicated to staff before merging/Feature can be deployed anytime
+* Includes (blocking) migration (create / drop table)
+* New to enable `specific_rule` to do something
+* `SomeWorker` or rake task used to do something
+* Before/after deploy, run on console `rake update_stuff`
 
 **Reference**
 
 * [JIRA](https://paybycourt.atlassian.net/browse/TICKET)
+* [Honey Badger]()
+* [Design Doc]()
 
-**Test Plan**
-
-- [x] Unit tests added/updated
-- [x] GraphQL/API tests (if applicable)
-- [ ] Manual testing in staging
+**Technical Diagrams (Mermaid) &/or Screenshots**
 
 <details>
-  <summary>Screenshots (if applicable)</summary>
+  <summary>Screenshot description</summary>
 
-  Add screenshots here
+  Collapsible and repeatable section for multiple screenshots
 </details>
 ```
 
@@ -85,10 +84,10 @@ git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || echo "not-pu
 # Push if needed
 git push -u origin $(git branch --show-current)
 
-# Create PR
+# Create PR (derive assignee from gh CLI — no hardcoded username)
 gh pr create --base develop \
   --title "TICKET | EMOJI type(scope): Description" \
-  --assignee juansleonc \
+  --assignee "$(gh api user --jq '.login')" \
   --label "ready for review" \
   --body "$(cat <<'EOF'
 ## Summary
@@ -115,7 +114,7 @@ EOF
 # Claude gathers info, then:
 gh pr create --base develop \
   --title "CORE-121 | ✨ feat(onboarding): Move hasCompleteProfile to userOnboardingStatus" \
-  --assignee juansleonc \
+  --assignee "$(gh api user --jq '.login')" \
   --label "ready for review" \
   --body "$(cat <<'EOF'
 **Background**
@@ -132,12 +131,16 @@ This PR moves the check to a dedicated database flag that's updated when profile
 **Reference**
 
 * [JIRA](https://paybycourt.atlassian.net/browse/CORE-121)
+* [Honey Badger]()
+* [Design Doc]()
 
-**Test Plan**
+**Technical Diagrams (Mermaid) &/or Screenshots**
 
-- [x] Unit tests added for User model
-- [x] GraphQL query tests updated
-- [ ] Manual testing in staging
+<details>
+  <summary>Screenshot description</summary>
+
+  Collapsible and repeatable section for multiple screenshots
+</details>
 
 EOF
 )"
@@ -156,9 +159,9 @@ Use for enhanced PR operations:
 mcp__github__create_pull_request:
   owner: "PlaybyCourt"
   repo: "platform"
-  title: "PLA-123 | ✨ feat(scope): Add feature X"
+  title: "CORE-123 | ✨ feat(scope): Add feature X"
   body: "## Summary\n..."
-  head: "feature/add-x"
+  head: "feature/CORE-123-add-feature-x"
   base: "develop"
 
 # List existing PRs to avoid duplicates
@@ -166,7 +169,7 @@ mcp__github__list_pull_requests:
   owner: "PlaybyCourt"
   repo: "platform"
   state: "open"
-  head: "feature/add-x"
+  head: "feature/CORE-123-add-feature-x"
 
 # Get PR review status
 mcp__github__get_pull_request:
