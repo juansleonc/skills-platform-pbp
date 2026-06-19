@@ -29,17 +29,9 @@ WHEN review feedback arrives:
 
 ## Confirm-Loop gate (before implementing ANY item)
 
-Keep only findings that are:
-1. **Real** — a genuine defect/improvement, not a style nit the bot pattern-matched.
-2. **In-scope** — introduced by `git diff develop...HEAD` (a bot flagging pre-existing legacy code is usually out-of-scope; say so, don't silently fix unrelated lines).
-3. **Reproducible** — provable without runtime instrumentation; for prod-state claims, verify with ClickHouse (`FINAL` + lag guard) / Honeybadger — MCP as MANUAL aids, never oracles.
+> Confirm-loop gate: see [.claude/skills/shared/confirm-loop-gate.md](../shared/confirm-loop-gate.md) for the full 5-step loop (gate real + in-scope + reproducible → confirm by type → document → terminate on 2 clean passes → action gate).
 
-Route confirmation by type:
-- code/logic → reproduce LOCALLY with a failing test first (rule #8 — real request, not runner+stub).
-- API/library usage → Context7 (a negative docs result is low-confidence; verify against signature dump before asserting absence).
-- "does this happen in prod / at what scale" → ClickHouse / Honeybadger.
-
-**Discard theoretical / out-of-scope items with a one-line technical reason.** Don't amplify a false positive just because a bot said it.
+**Skill-specific:** these are findings **others generated** (human PR reviewers, Bugbot, CodeRabbit, Greptile). Gate every item through the shared loop BEFORE implementing it — bots have the lowest trust and no context on intentional scope-outs, so gate them hardest. Discard theoretical / out-of-scope items with a one-line technical reason; don't amplify a false positive just because a bot said it.
 
 ## Forbidden responses
 
