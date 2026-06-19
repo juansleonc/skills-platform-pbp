@@ -18,7 +18,7 @@ disable-model-invocation: false
 Run this skill when:
 - **Modifying code** that uses date/time operations (Time, Date, DateTime)
 - **Writing/reviewing specs** with time-dependent assertions
-- **Before Ruby 3 upgrade** to find deprecated `.to_s(:format)` usage
+- **Before Rails 7.1+ upgrade** to find deprecated `.to_s(:format)` usage (removed in Rails 7.1)
 - **Investigating flaky tests** that fail intermittently (likely time-related)
 - **Adding features** with timezone-sensitive logic (scheduling, reservations, memberships)
 
@@ -40,8 +40,8 @@ Audit code for timezone-unsafe patterns and suggest fixes.
 - `Date.current` - Current date in application timezone
 - Facility-specific timezone methods when available
 
-**2. NEVER use deprecated `.to_s(:format)`** (Ruby 3):
-- Use `strftime` instead of symbol format
+**2. NEVER use deprecated `.to_s(:format)`** (Rails 7.1 removal — repo migrating to 7.2):
+- Use `strftime` or `to_fs(:format)` instead of the symbol form
 
 **3. Handle DST transitions** carefully
 
@@ -55,23 +55,24 @@ Audit code for timezone-unsafe patterns and suggest fixes.
 | `Time.new` | `Time.zone.local(...)` | Not timezone-aware |
 | `Time.parse(str)` | `Time.zone.parse(str)` | Not timezone-aware |
 | `Time.zone.now` | `Time.current` | Redundant (zone already set) |
-| `.to_s(:db)` | `.strftime('%Y-%m-%d %H:%M:%S')` | Deprecated Ruby 3 |
-| `.to_s(:short)` | `.strftime('%d %b %H:%M')` | Deprecated Ruby 3 |
+| `.to_s(:db)` | `.strftime('%Y-%m-%d %H:%M:%S')` or `.to_fs(:db)` | Deprecated Rails 7.0, removed Rails 7.1 |
+| `.to_s(:short)` | `.strftime('%d %b %H:%M')` or `.to_fs(:short)` | Deprecated Rails 7.0, removed Rails 7.1 |
 
-## Ruby 3 Date Formatting (CRITICAL)
+## Date Formatting (Rails 7.1 removal)
 
-**The `.to_s(:format)` syntax is deprecated in Ruby 3 and will be removed.**
+**The `.to_s(:format)` syntax is a Rails deprecation — deprecated in Rails 7.0 and removed in Rails 7.1. This repo is on Rails 6.1.7 migrating to 7.2, so these patterns will break during the upgrade. Ruby version is irrelevant.**
 
 ```ruby
-# ❌ DEPRECATED - Will break in Ruby 3
+# ❌ Deprecated in Rails 7.0, removed in Rails 7.1 — will break on upgrade to 7.2
 date.to_s(:db)              # "2024-01-15"
 time.to_s(:db)              # "2024-01-15 10:30:00"
 time.to_s(:short)           # "15 Jan 10:30"
 
-# ✅ CORRECT - Use strftime
+# ✅ CORRECT — use strftime (works everywhere) or to_fs (Rails 7.0+ alias)
 date.strftime('%Y-%m-%d')             # "2024-01-15"
 time.strftime('%Y-%m-%d %H:%M:%S')    # "2024-01-15 10:30:00"
 time.strftime('%d %b %H:%M')          # "15 Jan 10:30"
+# or: date.to_fs(:db) / time.to_fs(:short)  (Rails 7.0+, not available on 6.1)
 ```
 
 ### Common Format Replacements
@@ -160,10 +161,10 @@ grep -rn "Time\.now\|Date\.today\|DateTime\.now\|Time\.zone\.now" app/ lib/ --in
 > **📖 See [ast-grep Patterns](../shared/ast-grep-patterns.md)** when `sg` is installed: `sg run --lang ruby --pattern 'Time.now' app/ lib/` matches only real call expressions — no `grep -v "# "` heuristic needed (eliminates comment/string false positives). Otherwise this grep is the right tool.
 
 ```bash
-# 2. Find deprecated .to_s(:format) - Ruby 3 (CRITICAL)
+# 2. Find deprecated .to_s(:format) — Rails 7.1 removal (CRITICAL before upgrade)
 grep -rn "\.to_s(:db)\|\.to_s(:short)\|\.to_s(:long)" app/ lib/ spec/ --include="*.rb"
 ```
-**Expected**: 0 matches (all should use `.strftime()`)
+**Expected**: **0 NEW occurrences in changed lines**. Known baseline (2026-06-15): 3 in `spec/requests/api/v1/users_controller_spec.rb` (lines 1337, 1408, 1448 — raw SQL with `1.day.ago.to_s(:db)`) — tracked debt, not new findings.
 
 ```bash
 # 3. Find specs without Timecop (HIGH RISK - flaky tests)
@@ -208,7 +209,7 @@ grep -rn "+ 24\.hours\|- 24\.hours" app/ --include="*.rb"
 | app/services/billing_service.rb:45 | `Time.now` | `Time.current` |
 | app/services/billing_service.rb:78 | `Date.today` | `Date.current` |
 
-#### Deprecated .to_s(:format) (Ruby 3)
+#### Deprecated .to_s(:format) (Rails 7.1 removal)
 | Location | Current | Fix |
 |----------|---------|-----|
 | app/models/user.rb:123 | `.to_s(:db)` | `.strftime('%Y-%m-%d %H:%M:%S')` |
@@ -269,12 +270,12 @@ end
 
 Note: `app/models/membership.rb:178` in this codebase contains `Time.zone.now` in a pause/resume transition — a different pattern. `app/services/reservation_notifier.rb` and `app/services/payment_service.rb` do not exist at HEAD.
 
-### EXAMPLE 2: Deprecated `.to_s(:format)` on timestamps (Ruby 3)
+### EXAMPLE 2: Deprecated `.to_s(:format)` on timestamps (Rails 7.1 removal)
 ```ruby
-# ❌ BAD - Deprecated Ruby 3
+# ❌ BAD - Deprecated in Rails 7.0, removed in Rails 7.1
 starts = reservation.starts_at.to_s(:db)
 
-# ✅ GOOD - Ruby 3 compatible
+# ✅ GOOD - Works on all Rails versions
 starts = reservation.starts_at.strftime('%Y-%m-%d %H:%M:%S')
 
 # ✅ BETTER - Nil-safe
@@ -336,7 +337,7 @@ report_date = Time.now.beginning_of_day
 report_date = Time.current.beginning_of_day
 ```
 
-#### Deprecated .to_s(:format) (Ruby 3)
+#### Deprecated .to_s(:format) (Rails 7.1 removal)
 
 ##### app/models/membership.rb:145
 ```ruby

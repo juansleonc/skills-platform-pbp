@@ -49,6 +49,13 @@ Archived from SKILL.md inline log. Entries are verbatim and in chronological ord
 - "Expected: 0 matches" for Quick Validation check #1 reframed: known legacy baseline (2026-06-10) is ~22 `Time.now` + ~102 `Time.zone.now` in `app/`. "0" now means 0 NEW occurrences in changed lines, not a global zero.
 - Lesson: file:line citations must verify against HEAD or be labeled illustrative; "Expected: 0" must mean 0 NEW in changed lines, with the legacy baseline stated.
 
+<!-- Kaizen: 2026-06-15 — Correctness: Ruby-vs-Rails mis-attribution + stale baseline (optimize-skill) -->
+- **Ruby-vs-Rails mis-attribution corrected**: `.to_s(:format)` is a **Rails** deprecation (deprecated Rails 7.0, removed Rails 7.1), not a Ruby version concern. All occurrences of "Ruby 3" framing removed from: H1 section header, H2 trigger in "When to Use", Critical Rules #2, Unsafe Patterns table reason column, code block inline comment, cmd #2 label, EXAMPLE 2 title and inline comment, Report Format section header, and worked Example transcript section. Replaced with "Rails 7.1 removal" framing. Also added `to_fs(:format)` as the direct Rails replacement alongside `strftime` (Rails 7.0+ only, noted as not available on 6.1).
+- **Stale baseline for cmd #2 corrected**: Previous "Expected: 0 matches" was factually wrong — codebase has 3 known occurrences (`spec/requests/api/v1/users_controller_spec.rb` lines 1337, 1408, 1448). Adopted same pattern as cmd #1: "0 NEW in changed lines; known baseline (2026-06-15): 3 in users_controller_spec.rb — tracked debt."
+- **Trigger in "When to Use" updated**: "Before Ruby 3 upgrade" → "Before Rails 7.1+ upgrade ... (removed in Rails 7.1)".
+- Lines: 413 → 421 (+8 net, correction prose expanded).
+- Deferred (user decisions): optional relocation of ~190 lines of illustrative examples + worked transcript to reference/examples.md; optional dedup of Critical Rules prose against ../shared/critical-rules.md.
+
 <!-- Kaizen: 2026-06-14 — Skills audit cleanup (Fable audit Tier 2') -->
 - Frontmatter `description` expanded: was "find Time.now usage and suggest Time.current" (too narrow, TriggerPrecision=3). Now covers all unsafe patterns: Date.today, DateTime.now, Time.new, Time.parse, date-handling logic, time-dependent specs, deprecated .to_s(:format). Score target: TriggerPrecision=5.
 - Removed `Edit` from `allowed-tools` (self-edit-via-Edit anti-pattern per audit cross-cutting theme #1).
