@@ -22,6 +22,11 @@ disable-model-invocation: false
 Comprehensive code review enforcing all project critical rules using grep-based analysis. Optional manual research with Context7 (docs), ClickHouse (production data), and Honeybadger (errors) when additional context is needed.
 
 > **Skill scope**: Use `/code-review` for convention/correctness/performance review of a diff (the "is this code right?" gate). Use `/adversarial-review` when you need a reasoning-based gate that actively tries to BREAK a fix or claim (the "can this fail?" gate).
+>
+> **Delegation / pairing (don't duplicate depth here)** — `/code-review` does the broad spot-check; hand off the deep analysis so this skill stays lean:
+> - **ClickHouse / query verification** (EXPLAIN plans, index validation, production volume on a specific query) → defer to **`/query-analyzer`**. Steps 12 here are a spot-check, not the deep dive.
+> - **Deep N+1 / index / memory analysis** across the diff → defer to **`/performance`** (broad code-pattern review). The Performance checklist below flags candidates; `/performance` confirms them.
+> - **Adversarial failure-construction** (actively building inputs/races that BREAK a fix) → pair with **`/adversarial-review`**; it complements, not replaces, this skill's correctness pass.
 
 ## MCP TOOLS FOR CODE REVIEW
 
@@ -110,97 +115,37 @@ git diff develop --stat
 Before any other review, verify critical rules:
 
 ```bash
-# Timezone safety violations
+# Timezone safety
 grep -rn "Time\.now\|Date\.today\|DateTime\.now" <changed_files> --include="*.rb"
 
-# Nil safety in string interpolations (edge cases)
+# Nil safety: &. result fed into string interpolation (needs nil validation)
 grep -rn '&\.\w\+.*".*#{'  <changed_files> --include="*.rb"
-# Check: Every .first&. or &. followed by string interpolation needs nil validation
-# Example: body = "#{prefix} | #{var}" where var came from &.
-
-# Edge case detection: Unsafe safe navigation
-# Pattern: var = something&.method followed by string interpolation
 grep -A5 '&\.\w\+' <changed_files> --include="*.rb" | grep -B1 '".*#{.*}' | head -20
-# Review: Does interpolation handle nil from &.?
 
-# Edge case detection: .first without nil check
+# Nil safety: .first result used without validation
 grep -A3 '\.first[^_]' <changed_files> --include="*.rb" | grep -v 'if\|unless\|&\.\|try' | head -20
-# Review: Is .first result validated before use?
 
-# Multi-tenancy check - queries without facility_id
+# Multi-tenancy: queries not scoped by facility_id
 grep -rn "\.where\|\.find_by\|\.find\|scope" <changed_files> --include="*.rb" | grep -v "facility"
 
-# Payment transactions check
+# Payment ops — verify wrapped in ActiveRecord::Base.transaction
 grep -rn "PaymentService\|PaymentTransaction\|payment" <changed_files> --include="*.rb"
-# Verify they're wrapped in: ActiveRecord::Base.transaction do
 
-# API changes for mobile compatibility
+# API/mobile compat — field changes in GraphQL
 git diff develop -- app/graphql/ | grep -E "^[-+].*field\s+:"
 
-# Ticket IDs in comments (FORBIDDEN - use commit prefix instead)
+# Ticket IDs in comments (FORBIDDEN — belong in commit prefix; regression tests exempt)
 grep -rn "#.*\(CORE-[0-9]\|PLA-[0-9]\|CLS-[0-9]\)" <changed_files> --include="*.rb" | grep -v "regression\|Regression"
-# Expected: Empty (ticket numbers belong in commit messages, not code comments)
-# Exception: Regression tests can reference original ticket for historical context
-
-# Redundant comments (DISCOURAGED - code/git already documents WHAT)
-# Look for comments that just repeat the code/method name without explaining WHY
-# Examples to avoid:
-#   "# Customer-friendly status fields" above field definitions
-#   "# Add new fields" before adding fields
-#   "# Update display status" before updating status
-# Use comments only for non-obvious things: WHY, not WHAT
 ```
+
+> Also flag **redundant comments** that restate WHAT the code does (`# Add new fields`, `# Update display status`) — comments are for non-obvious WHY only.
 
 ### Step 3: Method Refactoring Pattern Detection (MANDATORY - Two-Part Check)
 
 **When git diff shows a method being moved/renamed, must verify TWO things:**
-1. All callers updated to new signature
-2. New method handles nil safely
 
----
-
-#### Part 1: Verify All Callers Updated
-
-```bash
-# 1. Detect method refactoring (method removed from one class, added to another)
-git diff develop | grep -E "^-.*def (method_name)"
-
-# 2. Find ALL usages of old method signature
-grep -rn "old_class\.method_name" app/ spec/ packs/
-
-# Example from CORE-205:
-# Method moved from MembershipPlanPrice to Membership
-grep -rn "membership_plan_price\.in_pre_sale_period\?" app/ spec/
-# Expected: Zero matches (all updated) OR only in historical files (migrations, changelogs)
-
-# 3. Verify EACH usage was updated to new signature
-# If grep finds matches → MUST verify each file updated to new signature
-```
-
-**Common refactoring patterns:**
-- Model method moved: `membership_plan_price.method` → `membership.method`
-- Service renamed: `OldService.calculate` → `NewService.calculate`
-- Module relocated: `OldModule.method` → `NewModule.method`
-- Helper moved: `old_helper_method` → `new_helper_method`
-
----
-
-#### Part 2: Validate New Method Nil Safety (CRITICAL - Added after CORE-205)
-
-```bash
-# Extract new method body and check for nil crash patterns
-git diff develop <file> | grep -A20 "^+.*def method_name"
-
-# Check for direct attribute access without nil guards:
-# Look for: object.attribute or object.method() where object might be nil
-
-# Example from CORE-205:
-git diff develop app/models/membership.rb | grep -A15 "^+.*def in_pre_sale_period"
-# Found: facility.current_time (CRASH if facility is nil!)
-# Found: facility.current_time_zone (CRASH if facility is nil!)
-# Question: Is 'facility' guaranteed non-nil?
-# Fix: Add "return false if facility.blank?" BEFORE any facility.* calls
-```
+1. **Part 1 — All callers updated to new signature.** Detect with `git diff develop | grep -E "^-.*def (method_name)"`, then `grep -rn "old_class\.method_name" app/ spec/ packs/` — expect zero matches (or historical files only). Common patterns: model method moved, service renamed, module relocated, helper moved.
+2. **Part 2 — New method handles nil safely.** Extract the new body (`git diff develop <file> | grep -A20 "^+.*def method_name"`) and check for direct dereferences (`object.attribute`) where `object` might be nil. Add a `return X if object.blank?` guard BEFORE any `.` call.
 
 **Nil Safety Checklist for New/Refactored Methods:**
 
@@ -212,93 +157,40 @@ git diff develop app/models/membership.rb | grep -A15 "^+.*def in_pre_sale_perio
 | Array access | `items.first.price` | Crashes if nil | `items.first&.price` |
 | Method expecting objects | `date.strftime('%Y')` | NoMethodError | Guard: `date ? date.strftime(...) : nil` |
 
-**Validation Questions for Each Variable:**
+**For every variable used in a new method, ask:** Can this be nil? If yes, is there a nil guard BEFORE dereferencing? Should I check production data with ClickHouse (Step 12)?
 
-For every variable used in new method, ask:
-1. Can this be nil? (Check model associations, optional fields)
-2. If yes, is there a nil guard BEFORE dereferencing?
-3. Should check production data with ClickHouse (Step 12)
+**When to use:** ✅ method removal + addition with same name in different classes · ✅ new methods that dereference variables · ✅ refactoring methods that call attributes on objects. ❌ Skip for purely internal private methods (one caller).
 
----
-
-**Example Failure from CORE-205:**
-
-```ruby
-# ❌ BUGGY (what we committed - Part 1 passed, Part 2 failed):
-def in_pre_sale_period?
-  facility = membership_plan.owner_facility  # Can be nil!
-  facility.current_time.to_date  # ← Crashes if facility is nil
-  facility.current_time_zone     # ← Crashes if facility is nil
-end
-
-# ✅ FIXED (after bugbot caught it):
-def in_pre_sale_period?
-  facility = membership_plan.owner_facility
-  return false if facility.blank?  # ← Added nil guard
-  facility.current_time.to_date
-end
-```
-
-**When to use:**
-- ✅ ALWAYS when method removal + addition with same name in different classes
-- ✅ ALWAYS when adding new methods that dereference variables
-- ✅ ALWAYS when refactoring methods that call attributes/methods on objects
-- ❌ Skip for purely internal private methods (only one caller)
-
-**Production Validation (Step 12 integration):**
-
-```sql
--- For CORE-205, should have checked:
-SELECT countIf(owner_facility_id IS NULL) as null_count
-FROM pbp_productionDB_optimized.membership_plans
--- If > 0, method MUST handle nil
-```
+> **📖 Full worked walkthrough (Part 1/Part 2 bash commands, the CORE-205 buggy-vs-fixed example, and the `owner_facility_id` production-validation SQL): see [Code Review Examples → Example A](../shared/code-review-examples.md#example-a-method-refactoring-pattern-detection-two-part-check).**
 
 ### Step 4: Structural Quality Check
 
 **Detect structural code smells in changed files:**
 
-> **📖 See [Structural Thresholds](../shared/structural-thresholds.md) for warning/critical limits.**
+> **📖 Warning/critical limits + the full detection-command set (fat controller, long method, callback overload, Demeter, associations/scopes/public-methods per model) → [Structural Thresholds](../shared/structural-thresholds.md).**
 >
 > Use `Grep` and `Glob` for symbol-level discovery. (Serena removed 2026-06-02.)
 
+Representative check (fat model: >200 warning, >400 critical) on changed files; run the rest from the shared file scoped to `git diff develop --name-only`:
+
 ```bash
-# 1. Fat model detection (>200 lines = warning, >400 = critical)
 git diff develop --name-only -- app/models/ | while read f; do
   lines=$(wc -l < "$f" 2>/dev/null)
-  if [ "$lines" -gt 400 ]; then
-    echo "🔴 CRITICAL: $f has $lines lines (>400)"
-  elif [ "$lines" -gt 200 ]; then
-    echo "🟡 WARNING: $f has $lines lines (>200)"
-  fi
+  if [ "$lines" -gt 400 ]; then echo "🔴 CRITICAL: $f has $lines lines (>400)"
+  elif [ "$lines" -gt 200 ]; then echo "🟡 WARNING: $f has $lines lines (>200)"; fi
 done
 
-# 2. Fat controller detection (>150 lines = warning, >300 = critical)
-git diff develop --name-only -- app/controllers/ | while read f; do
-  lines=$(wc -l < "$f" 2>/dev/null)
-  if [ "$lines" -gt 300 ]; then
-    echo "🔴 CRITICAL: $f has $lines lines (>300)"
-  elif [ "$lines" -gt 150 ]; then
-    echo "🟡 WARNING: $f has $lines lines (>150)"
-  fi
-done
-
-# 3. Long method detection (>15 lines in changed files)
-git diff develop --name-only -- '*.rb' | while read f; do
-  awk '/def [a-z]/{start=NR; name=$0} /^[[:space:]]*end$/{if(NR-start>15) print "🟡 " FILENAME ":" start " method too long (" NR-start " lines): " name}' "$f" 2>/dev/null
-done
-
-# 4. Callback overload (>5 callbacks per model)
-git diff develop --name-only -- app/models/ | while read f; do
-  count=$(grep -c "before_\|after_\|around_" "$f" 2>/dev/null)
-  if [ "$count" -gt 5 ]; then
-    echo "🟡 WARNING: $f has $count callbacks (>5)"
-  fi
-done
-
-# 5. Law of Demeter violations (chains >3 levels in changed files)
+# Law of Demeter (chains >3 levels) in changed Ruby files
 git diff develop --name-only -- '*.rb' | xargs grep -n '\.\w\+\.\w\+\.\w\+\.\w\+' 2>/dev/null | grep -v "#\|spec/\|test/\|migration"
 ```
+
+**LLM-slop / dead-abstraction check (codegen-era):** beyond structural smells, flag code that is *plausible but pointless* — the fastest-growing defect class with AI-assisted authoring. In changed files look for:
+- Speculative abstraction with a single caller (a wrapper/indirection that adds no behavior) → inline it.
+- Defensive cruft for impossible states (nil-guard on a value the type guarantees; rescue around code that cannot raise).
+- Dead params, unused yields, options no caller ever exercises.
+- "Belt-and-suspenders" duplication: the same guard re-checked at multiple layers within this diff.
+
+Bar: *does this token earn its place?* If removing it changes no behavior and loses no WHY → slop; route to `/simplify`.
 
 ### Step 5: Specification Test (Layer Validation)
 
@@ -355,158 +247,35 @@ current_facility.members.where(...)
 
 ### Step 7: API Backward Compatibility
 
-For ANY GraphQL changes:
+For ANY GraphQL changes: removing a field, changing a field type, or removing a query/mutation BREAKS mobile — deprecate instead (`deprecation_reason:`); adding a field is always safe. Defer to **`/graphql`** for the full backward-compat pass.
 
-```ruby
-# BAD - Removing field (breaks mobile)
-- field :old_field, String
-
-# BAD - Changing field type
-- field :count, Integer
-+ field :count, String
-
-# BAD - Removing query/mutation
-- field :old_query, resolver: OldQueryResolver
-
-# GOOD - Deprecating
-field :old_field, String, deprecation_reason: "Use new_field instead"
-
-# GOOD - Adding new field (always safe)
-+ field :new_field, String
-```
+> **📖 Good/bad examples → [step-playbooks.md → Step 7](reference/step-playbooks.md#step-7--api-backward-compatibility-graphql).**
 
 ### Step 8: Sidekiq Job Patterns
 
-For ANY job changes:
+For ANY job changes: single hash argument (`def perform(args)` + `deep_symbolize_keys`), variables initialized BEFORE try blocks, payment jobs idempotent via an idempotency key. Defer to **`/sidekiq`** for full validation.
 
-```ruby
-# BAD - Multiple arguments
-def perform(user_id, facility_id, options)
-
-# GOOD - Single hash argument (Ruby 3 compatibility)
-def perform(args)
-  args = args.deep_symbolize_keys
-  return unless args.is_a?(Hash)
-  # Initialize variables BEFORE try blocks
-  user = nil
-  begin
-    user = User.find(args[:user_id])
-  rescue => e
-    # user is accessible here for logging
-  end
-end
-
-# Payment jobs MUST be idempotent
-def perform(args)
-  args = args.deep_symbolize_keys
-  idempotency_key = args[:idempotency_key]
-  return if already_processed?(idempotency_key)
-  # ... process
-end
-```
+> **📖 Good/bad examples → [step-playbooks.md → Step 8](reference/step-playbooks.md#step-8--sidekiq-job-patterns).**
 
 ### Step 9: Cross-Job Consistency Validation
 
-**When reviewing multiple similar jobs** (e.g., 3 new reminder jobs), check for PATTERN CONSISTENCY:
+**When reviewing multiple similar jobs** (e.g., 3 new reminder jobs), check for PATTERN CONSISTENCY across error handling (`rescue StandardError`), throttling (`sidekiq_throttle`), and error notification (`JobsNotificationMailer`/`ErrorService`).
 
-```bash
-# Find all job files being changed
-changed_jobs=$(git diff develop --name-only | grep "app/jobs/.*_job\.rb")
+**Red Flag**: one job in a group has a guard the others lack = INCONSISTENCY BUG. If 2+ jobs share a pattern, ALL similar jobs should.
 
-# For each pattern, verify consistency:
-echo "$changed_jobs" | while read job; do
-  echo "=== $job ==="
-
-  # 1. Error handling pattern
-  grep -n "rescue StandardError" "$job" || echo "⚠️ Missing rescue block"
-
-  # 2. Throttling pattern
-  grep -n "sidekiq_throttle" "$job" || echo "ℹ️ No throttling"
-
-  # 3. Error notification pattern
-  grep -n "JobsNotificationMailer\|ErrorService" "$job" || echo "⚠️ Missing error notification"
-done
-```
-
-**Consistency Rules**:
-- If 2+ jobs have `rescue StandardError`, ALL similar jobs should have it
-- If 2+ jobs have throttling, validate throttle keys are consistent
-- If 2+ jobs send notifications, validate notification methods match
-
-**Red Flag**: One job in a group has error handling, others don't = INCONSISTENCY BUG
-
-**Example from CORE-81**:
-```ruby
-# ✅ ClinicLessonReminderJob has:
-rescue StandardError => e
-  JobsNotificationMailer.new_error(...)
-  ErrorService.new(e, ...).notify
-end
-
-# ✅ MembershipExpirationReminderJob has:
-rescue StandardError => e
-  JobsNotificationMailer.new_error(...)
-  ErrorService.new(e, ...).notify
-end
-
-# ❌ MembershipReminderJob MISSING rescue block
-# → This is a consistency bug! All 3 jobs should have same error handling.
-```
+> **📖 Consistency-grep script + the CORE-81 `MembershipReminderJob` missing-rescue example → [step-playbooks.md → Step 9](reference/step-playbooks.md#step-9--cross-job-consistency-core-81-worked-example).**
 
 ### Step 10: GraphQL Patterns
 
-```ruby
-# CHECK for deferred queries usage (performance)
-field :heavy_data, resolver: HeavyResolver do
-  extension GraphQL::Pro::Defer  # Should use this for heavy operations
-end
+Check: deferred queries (`GraphQL::Pro::Defer`) for heavy operations · auth in `GraphqlController` not resolvers · `rescue_from ActiveRecord::RecordNotFound` → `GraphQL::ExecutionError`.
 
-# CHECK for custom auth in GraphqlController
-# Authentication should be in controller, not resolvers
-
-# CHECK for proper error handling
-rescue_from ActiveRecord::RecordNotFound do |err|
-  raise GraphQL::ExecutionError, "Not found"
-end
-```
+> **📖 Code examples → [step-playbooks.md → Step 10](reference/step-playbooks.md#step-10--graphql-patterns).**
 
 ### Step 11: Context7 Best Practices Lookup (Optional - Manual)
 
-**When encountering unfamiliar patterns, manually query Context7:**
+When you hit an unfamiliar pattern, manually query Context7 (`resolve-library-id` → `query-docs`) for official-docs best practices on ActiveRecord, Sidekiq, GraphQL, RSpec, Redis, or payment idempotency.
 
-```
-# 1. Resolve library ID first
-mcp__context7__resolve-library-id:
-  libraryName: "rails"
-  query: "performance best practices ActiveRecord queries"
-
-# 2. Query specific patterns
-mcp__context7__query-docs:
-  libraryId: "/rails/rails"
-  query: "N+1 prevention includes preload eager_load"
-```
-
-**Required Context7 queries by code type:**
-
-| Code Type | Query |
-|-----------|-------|
-| ActiveRecord | `"ActiveRecord performance includes vs joins vs preload"` |
-| Sidekiq | `"Sidekiq best practices job design patterns"` |
-| GraphQL | `"graphql-ruby performance deferred execution"` |
-| RSpec | `"RSpec best practices fast tests factory patterns"` |
-| Redis | `"Redis Rails caching patterns memory optimization"` |
-| Payments | `"Stripe idempotency keys payment processing"` |
-
-**Performance-specific queries:**
-```
-mcp__context7__query-docs:
-  libraryId: "/rails/rails"
-  query: "database query optimization avoiding N+1 bullet gem"
-
-mcp__context7__query-docs:
-  libraryId: "/rspec/rspec"
-  query: "fast test suite factory build vs create"
-```
+> **📖 Query catalog (by code type + performance-specific queries) → [context7-queries.md](reference/context7-queries.md).**
 
 ### Step 12: ClickHouse Production Data Verification (MANDATORY for Data Operations)
 
@@ -527,39 +296,7 @@ grep -rn '\.first\|\.last\|\.try\|&\.' <changed_files> --include="*.rb"
 # 3. Is result iterated? → Check for empty collection
 ```
 
-When needed, manually query ClickHouse to verify code changes against production data:
-
-```sql
--- Database: pbp_productionDB_optimized
-
--- 1. Table structure verification
-SELECT column_name, data_type, is_nullable
-FROM system.columns
-WHERE database = 'pbp_productionDB_optimized'
-AND table = '<table_name>'
-
--- 2. Data volume (affects query performance)
-SELECT count(*) as row_count
-FROM pbp_productionDB_optimized.<table>
-
--- 3. NULL patterns (critical for .try, &., safe navigation)
-SELECT
-  '<field>' as field,
-  count(*) as total,
-  countIf(<field> IS NULL) as nulls,
-  round(countIf(<field> IS NULL) / count(*) * 100, 2) as pct
-FROM pbp_productionDB_optimized.<table>
-
--- 4. Field cardinality (affects index usefulness)
-SELECT uniqExact(<field>) as unique_values
-FROM pbp_productionDB_optimized.<table>
-
--- 5. Query that code will generate (estimate performance)
-EXPLAIN
-SELECT <fields>
-FROM pbp_productionDB_optimized.<table>
-WHERE <conditions>
-```
+When needed, manually query ClickHouse (database `pbp_productionDB_optimized`) to verify code against production data. The five-query template covers: (1) table structure, (2) row volume, (3) NULL patterns, (4) field cardinality, (5) `EXPLAIN` of the generated query.
 
 **Performance red flags to check:**
 
@@ -570,86 +307,23 @@ WHERE <conditions>
 | NULL handling | Check NULL percentage | Add explicit NULL checks |
 | N+1 in loops | Check related table size | Use includes/preload |
 
-```sql
--- Example: Check if membership query will be slow
-SELECT
-  count(*) as total_memberships,
-  countIf(status = 'active') as active,
-  countIf(expires_at < now()) as expired
-FROM pbp_productionDB_optimized.memberships
-
--- If > 100k, the code needs pagination or background job
-```
+> **📖 Full SQL template (the 5 verification queries + the memberships slow-query example): see [Code Review Examples → Example B](../shared/code-review-examples.md#example-b-clickhouse-production-data-verification-template-step-12).**
+>
+> **Delegation:** for EXPLAIN-plan + index validation + ClickHouse volume context on a *specific* slow query, defer to **`/query-analyzer`** (this step is the broad in-review spot-check; `/query-analyzer` is the deep dive).
 
 ### Step 13: Production Error Context (Honeybadger + Sentry)
 
-Check for related production errors in both systems:
+Check for related production errors in both systems for the changed files: Honeybadger (Rails) via `list_faults`/`get_fault`; Sentry (GraphQL/Mobile/Frontend) via `search_issues`. Route by changed code — GraphQL → `sentry/graphql_pro`, mobile → `sentry/pbp-mobile`, frontend → `sentry/platform-frontend-0j`, Sidekiq → `sentry/sidekiq-platform`, general Rails → Honeybadger + `sentry/platform`.
 
-**Honeybadger:**
-```
-mcp__honeybadger__list_faults: Search for faults related to changed files
-mcp__honeybadger__get_fault: Get details if relevant errors exist
-```
-
-**Sentry (for GraphQL, Mobile, Frontend):**
-```
-mcp__sentry__search_issues:
-  org_slug: "sentry"
-  project_slug: "graphql_pro"  # or "platform", "pbp-mobile", etc.
-  query: "is:unresolved <search_term>"
-
-mcp__sentry__search_issue_events:
-  issue_id: "<issue_id>"
-```
-
-**When to check which:**
-| Changed Code | Check |
-|--------------|-------|
-| GraphQL mutations/queries | `sentry/graphql_pro` |
-| Mobile-facing APIs | `sentry/pbp-mobile` |
-| Frontend/JS | `sentry/platform-frontend-0j` |
-| Sidekiq jobs | `sentry/sidekiq-platform` |
-| General Rails | Honeybadger + `sentry/platform` |
+> **📖 Invocation snippets + full project-slug routing table → [error-context-mcp.md](reference/error-context-mcp.md).**
 
 ### Step 14: Code Simplifier Agent (MANDATORY)
 
-**ALWAYS run code-simplifier for any non-trivial changes:**
+**ALWAYS run code-simplifier for any non-trivial changes** (Tier 2: MANDATORY). Skip ONLY for single-line typo fixes, comment-only changes, or config-file changes.
 
-```
-Agent tool:
-  subagent_type: "code-simplifier"
-  prompt: |
-    Review these files for performance and clarity:
-    <list of changed files>
+Invoke the `code-simplifier` Agent on the changed files, focusing on: PERFORMANCE (queries, N+1, loops, memory bloat), SIMPLIFICATION (redundancy, complex conditionals, long methods, naming), RAILS PATTERNS (scopes vs class methods, callbacks, service objects), and TEST EFFICIENCY (build vs create, setup, slow patterns).
 
-    Focus on:
-    1. PERFORMANCE:
-       - Unnecessary database queries
-       - N+1 patterns
-       - Inefficient loops
-       - Memory bloat (large object creation in loops)
-
-    2. SIMPLIFICATION:
-       - Redundant code that can be extracted
-       - Complex conditionals that can be simplified
-       - Long methods that should be split
-       - Unclear naming
-
-    3. RAILS PATTERNS:
-       - Use of scopes vs class methods
-       - Proper use of callbacks
-       - Service object patterns
-
-    4. TEST EFFICIENCY:
-       - build vs create usage
-       - Unnecessary setup
-       - Slow test patterns
-```
-
-**When to skip code-simplifier:**
-- Single-line typo fixes
-- Comment-only changes
-- Configuration file changes
+> **📖 Full agent prompt + integration details → [../shared/code-simplifier-integration.md](../shared/code-simplifier-integration.md).**
 
 ### Step 15: Run Automated Checks (Docker)
 
@@ -671,12 +345,7 @@ bin/d brakeman --only-files <files>
 ## Review Dimensions
 
 ### 1. Critical Rules (BLOCKING)
-- [ ] No `Time.now` usage (use `Time.current`)
-- [ ] Multi-tenancy: All queries scoped by `facility_id`
-- [ ] Payment operations use database transactions
-- [ ] No breaking API changes for mobile
-- [ ] Payment jobs are idempotent
-- [ ] No AI/Claude mentions in code or commits
+See the **Critical Rules Enforcement** table near the top of this skill (timezone, multi-tenancy, financial transactions, API compat, idempotency, no-AI-mentions, no-ticket-IDs) + [../shared/critical-rules.md](../shared/critical-rules.md). Do not re-list here — that table is the single canonical BLOCKING checklist.
 
 ### 2. Architecture Review
 - [ ] Package boundaries (Packwerk compliance)
@@ -718,138 +387,22 @@ bin/d brakeman --only-files <files>
 
 ## Report Format
 
-```markdown
-## Code Review: <branch-name>
-
-### Critical Rules Check
-| Rule | Status | Notes |
-|------|--------|-------|
-| Timezone Safety | OK / FAIL | |
-| Multi-tenancy | OK / FAIL | |
-| Financial Transactions | OK / FAIL / N/A | |
-| API Compatibility | OK / FAIL | |
-| Payment Idempotency | OK / FAIL / N/A | |
-
-### Context7 References
-- Rails: <relevant documentation patterns>
-- RSpec: <relevant testing patterns>
-
-### ClickHouse Production Verification
-- Data patterns: <findings from pbp_productionDB_optimized>
-- Edge cases: <potential NULL/empty handling issues>
-- Query performance: <optimization suggestions>
-
-### Production Error Context (Honeybadger + Sentry)
-- Honeybadger faults: <any related faults>
-- Sentry issues: <any related issues in graphql_pro, platform, etc.>
-
-### Architecture
-- OK / WARN / FAIL Finding with explanation
-
-### Security
-- OK / WARN / FAIL Finding with explanation
-
-### Performance
-- OK / WARN / FAIL Finding with explanation
-
-### Code Simplification (via code-simplifier)
-- <simplification opportunities>
-
-### Recommendations
-1. <actionable recommendation>
-2. <actionable recommendation>
-```
+> **📖 Full output template (Critical Rules table, Context7/ClickHouse/error sections, Architecture/Security/Performance findings, Recommendations) → [output-format.md](reference/output-format.md).**
 
 ## Project-Specific Checklists
 
-### Payment Code
-- [ ] Uses `ActiveRecord::Base.transaction`
-- [ ] Idempotent operations with idempotency key
-- [ ] Sandbox credentials only in tests
-- [ ] No hardcoded API keys
-- [ ] Uses `PaymentService::Base` for gateway routing
-- [ ] Checks `merchants` table for facility settings
+Apply the relevant per-domain block based on what the diff touches — Payment, GraphQL, Sidekiq Jobs, Models, Webhooks, Tests. (Project-wide BLOCKING rules are in the Critical Rules Check above + [../shared/critical-rules.md](../shared/critical-rules.md); these are the per-domain residuals.)
 
-### GraphQL
-- [ ] Uses deferred queries for heavy operations
-- [ ] Custom auth in GraphqlController (not resolvers)
-- [ ] Backward compatible changes only
-- [ ] Proper error handling with GraphQL::ExecutionError
-
-### Sidekiq Jobs
-- [ ] Single hash argument: `def perform(args)`
-- [ ] `args.deep_symbolize_keys` at start
-- [ ] Variables initialized before try blocks
-- [ ] Idempotent for payment operations
-- [ ] Proper error handling for Honeybadger
-
-### Models
-- [ ] Scoped by `facility_id` where needed
-- [ ] Uses `Time.current` not `Time.now`
-- [ ] Proper associations and validations
-- [ ] Admin override for cross-facility access documented
-
-### Webhooks
-- [ ] Uses `attr_encrypted` for credentials
-- [ ] Excludes encrypted fields from JSON by default
-- [ ] `include_decrypted: true` only when explicitly needed
-- [ ] Event builders in `app/services/webhook_event_builders/`
-
-### Tests
-- [ ] No `allow_any_instance_of`
-- [ ] No hardcoded IDs
-- [ ] Uses appropriate factory method
-- [ ] Time-dependent tests use `Timecop.freeze(Time.current)`
-- [ ] Redis cleared for rate limiting tests
-- [ ] 100% coverage on changes
+> **📖 Per-domain checklists → [domain-checklists.md](reference/domain-checklists.md).**
 
 ---
 
 ## MCP Integrations
 
-### GitHub MCP
+- **GitHub MCP** — PR-based review (`get_pull_request`, `get_pull_request_files`, `create_pull_request_review`).
+- **OpenSearch MCP** — search-related code (`IndexMappingTool`, `SearchIndexTool` with `explain: true`).
 
-Use for PR-based code review:
-
-```
-# Get PR details and diff
-mcp__github__get_pull_request:
-  owner: "PlaybyCourt"
-  repo: "platform"
-  pull_number: 123
-
-# Get PR files changed
-mcp__github__get_pull_request_files:
-  owner: "PlaybyCourt"
-  repo: "platform"
-  pull_number: 123
-
-# Submit review (also covers inline comments via the comments array)
-mcp__github__create_pull_request_review:
-  owner: "PlaybyCourt"
-  repo: "platform"
-  pull_number: 123
-  event: "COMMENT"  # or "APPROVE" or "REQUEST_CHANGES"
-  body: "## Code Review Summary\n..."
-```
-
-<!-- mcp__mermaid__* removed — server does not exist in this environment (Fable audit 2026-06-10). Use text-based diagrams instead. -->
-
-### OpenSearch MCP
-
-Use for checking search-related code:
-
-```
-# Verify index mappings
-mcp__opensearch__IndexMappingTool:
-  index: "users"
-
-# Check search query performance
-mcp__opensearch__SearchIndexTool:
-  index: "users"
-  explain: true
-  query: { ... }
-```
+> **📖 Invocation snippets → [mcp-integrations.md](reference/mcp-integrations.md).** (`mcp__mermaid__*` removed — server absent in this env; use text diagrams.)
 
 ---
 

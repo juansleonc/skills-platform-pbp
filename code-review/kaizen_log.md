@@ -4,6 +4,27 @@ Archived from SKILL.md during skills audit 2026-06-14. Full entry history preser
 
 ---
 
+<!-- Kaizen: 2026-06-15 - /optimize-skill body trim (748 → 407 lines) -->
+## SKILL.md body optimization (relocate + densify + dedup)
+
+Ran `/optimize-skill` (OPTIMIZE ≠ DELETE — every block relocated, none removed). Body 748 → 407 lines, under the 500 hard ceiling.
+
+**Relocated** verbatim playbook/reference blocks into new bundled `reference/*.md` (one level deep, all pointers resolve):
+- `reference/step-playbooks.md` (126 lines, has TOC) — Step 7 GraphQL backward-compat examples, Step 8 Sidekiq patterns, Step 9 CORE-81 cross-job example + grep script, Step 10 GraphQL patterns. These duplicate canonical examples owned by `/graphql` + `/sidekiq`; body now keeps the decision logic + a pointer.
+- `reference/context7-queries.md` — Step 11 Context7 query catalog.
+- `reference/error-context-mcp.md` — Step 13 Honeybadger/Sentry snippets + project-slug routing table.
+- `reference/output-format.md` — Report Format template (named output-format, not "report", to avoid findings-file heuristic).
+- `reference/domain-checklists.md` — Project-Specific per-domain checklists (Payment/GraphQL/Sidekiq/Models/Webhooks/Tests).
+- `reference/mcp-integrations.md` — GitHub + OpenSearch MCP invocation snippets.
+
+**Densified**: Step 2 critical-rules grep comments compressed to terse one-liners; Step 4 structural bash trimmed to one representative snippet (fat model) + Demeter, rest deferred to `../shared/structural-thresholds.md` (already holds the full command set); Step 14 code-simplifier prompt → pointer to `../shared/code-simplifier-integration.md` (MANDATORY gate kept inline).
+
+**Deduped**: collapsed the "Review Dimensions → 1. Critical Rules (BLOCKING)" re-list into a pointer to the single canonical "Critical Rules Enforcement" table + `../shared/critical-rules.md` (three near-duplicate clusters reduced to one).
+
+**Preserved untouched** (user-decisions, deferred): frontmatter (`allowed-tools` + `disable-model-invocation` NOT annotated as harness extensions); description NOT enriched; all MANDATORY framing on Steps 3/4/12/14 kept inline verbatim; 15-step structure left in body (not split into per-step files).
+
+---
+
 <!-- Kaizen: 2026-01-23 -->
 - Added: No ticket IDs in code comments rule (use commit message prefix instead)
 
