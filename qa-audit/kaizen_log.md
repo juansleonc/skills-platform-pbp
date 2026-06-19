@@ -5,6 +5,23 @@ See `SKILL.md` → "Kaizen: Continuous Improvement" for the current improvement 
 
 ---
 
+<!-- Kaizen: 2026-06-15 — Correctness pass: fix broken package-count check + stale literal -->
+- **Fixed (SKILL.md Step 1 comment)**: Removed stale literal "counts all 42". Live count is 43
+  (`find .claude/skills -iname 'skill.md' | wc -l`). Changed to point at the live command only,
+  matching the file's own "do not hardcode" convention used elsewhere.
+- **Fixed (SKILL.md Step 6 + qa_audit.sh Check 3)**: The package-count-accuracy check was
+  permanently broken: `grep -oiE "[0-9]+ Packwerk packages" .claude/skills/packwerk/skill.md`
+  matched nothing — packwerk's skill file moved its pack inventory to `reference/packs.md` and
+  contains no "N Packwerk packages" phrase. This produced a permanent false-positive
+  "packwerk declares ? packages but reality is 18" on every run. Fixed both SKILL.md (Step 6
+  prose now explains the doc move) and qa_audit.sh (Check 3 now verifies that
+  `reference/packs.md` exists as the canonical inventory doc, and reports the live count
+  without a false-positive comparison).
+- **Verified correct, not changed**: Step 4 cross-ref greps, Step 6 Makefile targets, all
+  skill references (commit, create-pr, coverage, tdd, etc.), frontmatter, Config Priority banner.
+
+---
+
 <!-- Kaizen: 2026-05-25 - Audit run: package drift + skill ecosystem grown to 49 -->
 - Fixed: `packwerk/skill.md` package count 15 → **18** (added `billing`, `electronic_invoicing`, `partners`). This skill is the sanctioned source of truth; updated it.
 - Reported (NOT fixed — never modify CLAUDE.md): CLAUDE.md still says "Fifteen domain packages" and its table lists 15. User must update manually.
