@@ -104,6 +104,15 @@ The coordinator keeps a running, append-only ledger at `investigations/<TICKET>/
 
 The seeded log opens with a header (ticket, one-line task, validation contracts C1..Cn, empty ledger) that entries append under.
 
+### Checkpoint + Clear
+
+When the log contains ≥5 THREAD LOG entries, MUST checkpoint:
+1. Dispatch a micro-worker: "Append to orchestration-log.md: `### CHECKPOINT — context reset (phase count N)\n- Done: …\n- Next phase: …\n- Open risks: …`"
+2. Inform the user: "Context pressure reached. Starting fresh session from log."
+3. The next session: read orchestration-log.md first, then continue from the last Open/next entry.
+
+The log IS the tattoo. Clearing the conversation context is safe as long as the log is current.
+
 ---
 
 ## 🗂️ Step 0: Check Investigations Folder (ALWAYS — Before Any Work)
@@ -116,6 +125,7 @@ BEFORE any ticket work (feature, fix, refactor), check for prior research: extra
 ```bash
 mkdir -p investigations/<TICKET>
 cp investigations/_RPI-TEMPLATE.md investigations/<TICKET>/understanding.md
+# STATUS: ACTIVE is pre-set at line 1; update to CLOSED when ticket is merged or parked.
 # also seed orchestration-log.md with a header (ticket, task, contracts, empty ledger)
 # strip to Phase 1 (Research); split Phase 2 → <feature>-design.md; Phase 3 → findings.md
 ```
