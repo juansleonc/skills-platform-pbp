@@ -77,8 +77,10 @@ Rules of the grill:
 - One theme at a time; don't dump 40 questions at once. Iterate.
 - When an answer opens a new branch, add it to the tree and keep grilling.
 - Surface assumptions explicitly: "I'm assuming X — confirm or correct."
-- It's normal for this to take many rounds (Pocock cites 40–100 questions for a
-  real feature). Depth here is cheaper than rework later.
+- **Depth calibration**: For non-trivial features, expect 40–100 exchanges across multiple
+  rounds — not as a quota to fill, but as a signal that no branch is unresolved. Stop when
+  every assumption, edge case, and out-of-scope item has a confirmed answer. For a small bug
+  fix or isolated change, 10 exchanges is fine. Depth here is cheaper than rework later.
 
 ### 3. Reflect the resolved model back
 
